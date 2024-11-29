@@ -2,20 +2,18 @@
 
 require "system_command"
 
-RSpec.describe SystemCommand::Result do
-  RSpec::Matchers.alias_matcher :a_string_containing, :include
-
-  subject(:result) do
+describe SystemCommand::Result do
+  subject(:result) {
     described_class.new([], output_array, instance_double(Process::Status, exitstatus: 0, success?: true),
                         secrets: [])
-  end
+  }
 
-  let(:output_array) do
+  let(:output_array) {
     [
       [:stdout, "output\n"],
       [:stderr, "error\n"],
     ]
-  end
+  }
 
   describe "#to_ary" do
     it "can be destructed like `Open3.capture3`" do
@@ -46,10 +44,10 @@ RSpec.describe SystemCommand::Result do
   end
 
   describe "#plist" do
-    subject(:result_plist) { result.plist }
+    subject { result.plist }
 
     let(:output_array) { [[:stdout, stdout]] }
-    let(:garbage) do
+    let(:garbage) {
       <<~EOS
         Hello there! I am in no way XML am I?!?!
 
@@ -59,8 +57,8 @@ RSpec.describe SystemCommand::Result do
 
         Hopefully <not> explode!
       EOS
-    end
-    let(:plist) do
+    }
+    let(:plist) {
       <<~XML
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -106,63 +104,63 @@ RSpec.describe SystemCommand::Result do
         </dict>
         </plist>
       XML
-    end
+    }
 
     context "when stdout contains garbage before XML" do
-      let(:stdout) do
+      let(:stdout) {
         <<~EOS
           #{garbage}
           #{plist}
         EOS
-      end
+      }
 
       it "ignores garbage" do
-        expect(result_plist["system-entities"].length).to eq(3)
+        expect(subject["system-entities"].length).to eq(3)
       end
 
       context "when verbose" do
         before do
-          allow(Context).to receive(:current).and_return(Context::ContextStruct.new(verbose: true))
+          allow(Homebrew).to receive(:args).and_return(OpenStruct.new("verbose?" => true))
         end
 
         it "warns about garbage" do
-          expect { result_plist }
+          expect { subject }
             .to output(a_string_containing(garbage)).to_stderr
         end
       end
     end
 
     context "when stdout contains garbage after XML" do
-      let(:stdout) do
+      let(:stdout) {
         <<~EOS
           #{plist}
           #{garbage}
         EOS
-      end
+      }
 
       it "ignores garbage" do
-        expect(result_plist["system-entities"].length).to eq(3)
+        expect(subject["system-entities"].length).to eq(3)
       end
 
       context "when verbose" do
         before do
-          allow(Context).to receive(:current).and_return(Context::ContextStruct.new(verbose: true))
+          allow(Homebrew).to receive(:args).and_return(OpenStruct.new("verbose?" => true))
         end
 
         it "warns about garbage" do
-          expect { result_plist }
+          expect { subject }
             .to output(a_string_containing(garbage)).to_stderr
         end
       end
     end
 
-    context "when there's a hdiutil stdout" do
+    context "given a hdiutil stdout" do
       let(:stdout) { plist }
 
       it "successfully parses it" do
-        expect(result_plist.keys).to eq(["system-entities"])
-        expect(result_plist["system-entities"].length).to eq(3)
-        expect(result_plist["system-entities"].map { |e| e["dev-entry"] })
+        expect(subject.keys).to eq(["system-entities"])
+        expect(subject["system-entities"].length).to eq(3)
+        expect(subject["system-entities"].map { |e| e["dev-entry"] })
           .to eq(["/dev/disk3s1", "/dev/disk3", "/dev/disk3s2"])
       end
     end
@@ -171,7 +169,7 @@ RSpec.describe SystemCommand::Result do
       let(:stdout) { "" }
 
       it "returns nil" do
-        expect(result_plist).to be_nil
+        expect(subject).to be nil
       end
     end
   end

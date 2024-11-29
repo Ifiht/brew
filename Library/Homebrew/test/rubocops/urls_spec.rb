@@ -2,10 +2,10 @@
 
 require "rubocops/urls"
 
-RSpec.describe RuboCop::Cop::FormulaAudit::Urls do
+describe RuboCop::Cop::FormulaAudit::Urls do
   subject(:cop) { described_class.new }
 
-  let(:offense_list) do
+  let(:formulae) {
     [{
       "url" => "https://ftpmirror.gnu.org/lightning/lightning-2.1.0.tar.gz",
       "msg" => 'Please use "https://ftp.gnu.org/gnu/lightning/lightning-2.1.0.tar.gz" instead of https://ftpmirror.gnu.org/lightning/lightning-2.1.0.tar.gz.',
@@ -63,8 +63,10 @@ RSpec.describe RuboCop::Cop::FormulaAudit::Urls do
       "col" => 2,
     }, {
       "url" => "http://prdownloads.sourceforge.net/foo/foo-1.tar.gz",
-      "msg" => "Don't use prdownloads in SourceForge urls " \
-               "(url is http://prdownloads.sourceforge.net/foo/foo-1.tar.gz).",
+      "msg" => <<~EOS.chomp,
+        Don't use prdownloads in SourceForge urls (url is http://prdownloads.sourceforge.net/foo/foo-1.tar.gz).
+                See: http://librelist.com/browser/homebrew/2011/1/12/prdownloads-is-bad/
+      EOS
       "col" => 2,
     }, {
       "url" => "http://foo.dl.sourceforge.net/sourceforge/foozip/foozip_1.0.tar.bz2",
@@ -178,28 +180,28 @@ RSpec.describe RuboCop::Cop::FormulaAudit::Urls do
       "msg" => "Use of the svn+http:// scheme is deprecated, pass `:using => :svn` instead",
       "col" => 2,
     }]
-  end
+  }
 
-  context "when auditing URLs" do
-    it "reports all offenses in `offense_list`" do
-      offense_list.each do |offense_info|
+  context "When auditing urls" do
+    it "with offenses" do
+      formulae.each do |formula|
         allow_any_instance_of(RuboCop::Cop::FormulaCop).to receive(:formula_tap)
-                                                       .and_return(offense_info["formula_tap"])
+                                                       .and_return(formula["formula_tap"])
         source = <<~RUBY
           class Foo < Formula
             desc "foo"
-            url "#{offense_info["url"]}"
+            url "#{formula["url"]}"
           end
         RUBY
-        expected_offenses = [{ message:  "FormulaAudit/Urls: #{offense_info["msg"]}",
+        expected_offenses = [{ message:  formula["msg"],
                                severity: :convention,
                                line:     3,
-                               column:   offense_info["col"],
-                               source: }]
+                               column:   formula["col"],
+                               source:   source }]
 
-        offenses = inspect_source(source)
+        inspect_source(source)
 
-        expected_offenses.zip(offenses.reverse).each do |expected, actual|
+        expected_offenses.zip(cop.offenses.reverse).each do |expected, actual|
           expect(actual.message).to eq(expected[:message])
           expect(actual.severity).to eq(expected[:severity])
           expect(actual.line).to eq(expected[:line])
@@ -208,30 +210,64 @@ RSpec.describe RuboCop::Cop::FormulaAudit::Urls do
       end
     end
 
-    it "reports an offense for GitHub repositories with git:// prefix" do
+    it "with offenses in stable/devel/head block" do
       expect_offense(<<~RUBY)
         class Foo < Formula
           desc "foo"
           url "https://foo.com"
 
-          stable do
+          devel do
             url "git://github.com/foo.git",
-            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ FormulaAudit/Urls: Please use https:// for git://github.com/foo.git
-                :tag => "v1.0.1",
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ Please use https:// for git://github.com/foo.git
+                :tag => "v1.0.0-alpha.1",
                 :revision => "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-            version "1.0.1"
+            version "1.0.0-alpha.1"
           end
         end
       RUBY
     end
 
-    it "reports an offense if `url` is the same as `mirror`" do
+    it "with duplicate mirror" do
       expect_offense(<<~RUBY)
         class Foo < Formula
           desc "foo"
           url "https://ftpmirror.fnu.org/foo/foo-1.0.tar.gz"
           mirror "https://ftpmirror.fnu.org/foo/foo-1.0.tar.gz"
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ FormulaAudit/Urls: URL should not be duplicated as a mirror: https://ftpmirror.fnu.org/foo/foo-1.0.tar.gz
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ URL should not be duplicated as a mirror: https://ftpmirror.fnu.org/foo/foo-1.0.tar.gz
+        end
+      RUBY
+    end
+  end
+
+  include_examples "formulae exist", described_class::BINARY_BOOTSTRAP_FORMULA_URLS_ALLOWLIST
+end
+
+describe RuboCop::Cop::FormulaAudit::PyPiUrls do
+  subject(:cop) { described_class.new }
+
+  context "when a pypi.python.org URL is used" do
+    it "reports an offense" do
+      expect_offense(<<~RUBY)
+        class Foo < Formula
+          desc "foo"
+          url "https://pypi.python.org/packages/source/foo/foo-0.1.tar.gz"
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ https://pypi.python.org/packages/source/foo/foo-0.1.tar.gz should be `https://files.pythonhosted.org/packages/source/foo/foo-0.1.tar.gz`
+        end
+      RUBY
+    end
+
+    it "support auto-correction" do
+      corrected = autocorrect_source(<<~RUBY)
+        class Foo < Formula
+          desc "foo"
+          url "https://pypi.python.org/packages/source/foo/foo-0.1.tar.gz"
+        end
+      RUBY
+
+      expect(corrected).to eq <<~RUBY
+        class Foo < Formula
+          desc "foo"
+          url "https://files.pythonhosted.org/packages/source/foo/foo-0.1.tar.gz"
         end
       RUBY
     end

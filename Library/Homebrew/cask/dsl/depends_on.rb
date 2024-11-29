@@ -1,29 +1,25 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
-
-require "delegate"
-
-require "requirements/macos_requirement"
 
 module Cask
   class DSL
-    # Class corresponding to the `depends_on` stanza.
-    class DependsOn < SimpleDelegator
+    class DependsOn < DelegateClass(Hash)
       VALID_KEYS = Set.new([
-        :formula,
-        :cask,
-        :macos,
-        :arch,
-      ]).freeze
+                             :formula,
+                             :cask,
+                             :macos,
+                             :arch,
+                             :x11,
+                             :java,
+                           ]).freeze
 
       VALID_ARCHES = {
         intel:  { type: :intel, bits: 64 },
         # specific
         x86_64: { type: :intel, bits: 64 },
-        arm64:  { type: :arm, bits: 64 },
       }.freeze
 
-      attr_reader :arch, :cask, :formula, :macos
+      attr_accessor :java
+      attr_reader :arch, :cask, :formula, :macos, :x11
 
       def initialize
         super({})
@@ -35,7 +31,7 @@ module Cask
         pairs.each do |key, value|
           raise "invalid depends_on key: '#{key.inspect}'" unless VALID_KEYS.include?(key)
 
-          __getobj__[key] = send(:"#{key}=", *value)
+          self[key] = send(:"#{key}=", *value)
         end
       end
 
@@ -47,27 +43,23 @@ module Cask
         @cask.concat(args)
       end
 
-      sig { params(args: T.any(String, Symbol)).returns(T.nilable(MacOSRequirement)) }
       def macos=(*args)
-        raise "Only a single 'depends_on macos' is allowed." if defined?(@macos)
-
-        # workaround for https://github.com/sorbet/sorbet/issues/6860
-        first_arg = args.first&.to_s
+        raise "Only a single 'depends_on macos:' is allowed." if defined?(@macos)
 
         begin
           @macos = if args.count > 1
             MacOSRequirement.new([args], comparator: "==")
-          elsif MacOSVersion::SYMBOLS.key?(args.first)
+          elsif MacOS::Version::SYMBOLS.key?(args.first)
             MacOSRequirement.new([args.first], comparator: "==")
-          elsif (md = /^\s*(?<comparator><|>|[=<>]=)\s*:(?<version>\S+)\s*$/.match(first_arg))
-            MacOSRequirement.new([T.must(md[:version]).to_sym], comparator: md[:comparator])
-          elsif (md = /^\s*(?<comparator><|>|[=<>]=)\s*(?<version>\S+)\s*$/.match(first_arg))
-            MacOSRequirement.new([md[:version]], comparator: md[:comparator])
-          else # rubocop:disable Lint/DuplicateBranch
+          elsif /^\s*(?<comparator><|>|[=<>]=)\s*:(?<version>\S+)\s*$/ =~ args.first
+            MacOSRequirement.new([version.to_sym], comparator: comparator)
+          elsif /^\s*(?<comparator><|>|[=<>]=)\s*(?<version>\S+)\s*$/ =~ args.first
+            MacOSRequirement.new([version], comparator: comparator)
+          else
             MacOSRequirement.new([args.first], comparator: "==")
           end
-        rescue MacOSVersion::Error, TypeError => e
-          raise "invalid 'depends_on macos' value: #{e}"
+        rescue
+          raise "invalid 'depends_on macos' value: #{args.first.inspect}"
         end
       end
 
@@ -80,6 +72,12 @@ module Cask
         raise "invalid 'depends_on arch' values: #{invalid_arches.inspect}" unless invalid_arches.empty?
 
         @arch.concat(arches.map { |arch| VALID_ARCHES[arch] })
+      end
+
+      def x11=(arg)
+        raise "invalid 'depends_on x11' value: #{arg.inspect}" unless [true, false].include?(arg)
+
+        @x11 = arg
       end
     end
   end

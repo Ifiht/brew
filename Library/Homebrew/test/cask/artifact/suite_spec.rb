@@ -1,15 +1,15 @@
 # frozen_string_literal: true
 
-RSpec.describe Cask::Artifact::Suite, :cask do
+describe Cask::Artifact::Suite, :cask do
   let(:cask) { Cask::CaskLoader.load(cask_path("with-suite")) }
 
-  let(:install_phase) do
+  let(:install_phase) {
     lambda do
       cask.artifacts.select { |a| a.is_a?(described_class) }.each do |artifact|
         artifact.install_phase(command: NeverSudoSystemCommand, force: false)
       end
     end
-  end
+  }
 
   let(:target_path) { cask.config.appdir.join("Caffeine") }
   let(:source_path) { cask.staged_path.join("Caffeine") }
@@ -27,9 +27,9 @@ RSpec.describe Cask::Artifact::Suite, :cask do
   it "avoids clobbering an existing suite by moving over it" do
     target_path.mkpath
 
-    expect do
+    expect {
       install_phase.call
-    end.to raise_error(Cask::CaskError)
+    }.to raise_error(Cask::CaskError)
 
     expect(source_path).to be_a_directory
     expect(target_path).to be_a_directory

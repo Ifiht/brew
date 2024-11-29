@@ -5,8 +5,8 @@ require "test/support/fixtures/testball"
 require "tab"
 require "keg"
 
-RSpec.describe Migrator do
-  subject(:migrator) { described_class.new(new_formula, old_formula.name) }
+describe Migrator do
+  subject { described_class.new(new_formula) }
 
   let(:new_formula) { Testball.new("newname") }
   let(:old_formula) { Testball.new("oldname") }
@@ -20,7 +20,7 @@ RSpec.describe Migrator do
   let(:old_pin) { HOMEBREW_PINNED_KEGS/"oldname" }
 
   before do |example|
-    allow(new_formula).to receive(:oldnames).and_return(["oldname"])
+    allow(new_formula).to receive(:oldname).and_return("oldname")
 
     # do not create directories for error tests
     next if example.metadata[:description].start_with?("raises an error")
@@ -40,7 +40,7 @@ RSpec.describe Migrator do
 
     old_pin.make_relative_symlink old_keg_record
 
-    migrator # needs to be evaluated eagerly
+    subject # needs to be evaluated eagerly
 
     (HOMEBREW_PREFIX/"bin").mkpath
   end
@@ -55,10 +55,16 @@ RSpec.describe Migrator do
   end
 
   describe "::new" do
+    it "raises an error if there is no old name" do
+      expect {
+        described_class.new(old_formula)
+      }.to raise_error(Migrator::MigratorNoOldnameError)
+    end
+
     it "raises an error if there is no old path" do
-      expect do
-        described_class.new(new_formula, "oldname")
-      end.to raise_error(Migrator::MigratorNoOldpathError)
+      expect {
+        described_class.new(new_formula)
+      }.to raise_error(Migrator::MigratorNoOldpathError)
     end
 
     it "raises an error if the Taps differ" do
@@ -69,15 +75,15 @@ RSpec.describe Migrator do
       tab.source["tap"] = "homebrew/core"
       tab.write
 
-      expect do
-        described_class.new(new_formula, "oldname")
-      end.to raise_error(Migrator::MigratorDifferentTapsError)
+      expect {
+        described_class.new(new_formula)
+      }.to raise_error(Migrator::MigratorDifferentTapsError)
     end
   end
 
   specify "#move_to_new_directory" do
     keg.unlink
-    migrator.move_to_new_directory
+    subject.move_to_new_directory
 
     expect(new_keg_record).to be_a_directory
     expect(new_keg_record/"bin").to be_a_directory
@@ -87,10 +93,10 @@ RSpec.describe Migrator do
   end
 
   specify "#backup_oldname_cellar" do
-    FileUtils.rm_r(old_keg_record.parent)
+    old_keg_record.parent.rmtree
     (new_keg_record/"bin").mkpath
 
-    migrator.backup_oldname_cellar
+    subject.backup_oldname_cellar
 
     expect(old_keg_record/"bin").to be_a_directory
     expect(old_keg_record/"bin").to be_a_directory
@@ -100,18 +106,18 @@ RSpec.describe Migrator do
     (new_keg_record/"bin").mkpath
     expected_relative = new_keg_record.relative_path_from HOMEBREW_PINNED_KEGS
 
-    migrator.repin
+    subject.repin
 
-    expect(migrator.new_pin_record).to be_a_symlink
-    expect(migrator.new_pin_record.readlink).to eq(expected_relative)
-    expect(migrator.old_pin_record).not_to exist
+    expect(subject.new_pin_record).to be_a_symlink
+    expect(subject.new_pin_record.readlink).to eq(expected_relative)
+    expect(subject.old_pin_record).not_to exist
   end
 
   specify "#unlink_oldname" do
     expect(HOMEBREW_LINKED_KEGS.children.count).to eq(1)
     expect((HOMEBREW_PREFIX/"opt").children.count).to eq(1)
 
-    migrator.unlink_oldname
+    subject.unlink_oldname
 
     expect(HOMEBREW_LINKED_KEGS).not_to exist
     expect(HOMEBREW_LIBRARY/"bin").not_to exist
@@ -126,7 +132,7 @@ RSpec.describe Migrator do
       FileUtils.touch new_keg_record/"bin"/file
     end
 
-    migrator.link_newname
+    subject.link_newname
 
     expect(HOMEBREW_LINKED_KEGS.children.count).to eq(1)
     expect((HOMEBREW_PREFIX/"opt").children.count).to eq(1)
@@ -134,7 +140,7 @@ RSpec.describe Migrator do
 
   specify "#link_oldname_opt" do
     new_keg_record.mkpath
-    migrator.link_oldname_opt
+    subject.link_oldname_opt
     expect((HOMEBREW_PREFIX/"opt/oldname").realpath).to eq(new_keg_record.realpath)
   end
 
@@ -142,7 +148,7 @@ RSpec.describe Migrator do
     (new_keg_record/"bin").mkpath
     keg.unlink
     keg.uninstall
-    migrator.link_oldname_cellar
+    subject.link_oldname_cellar
     expect((HOMEBREW_CELLAR/"oldname").realpath).to eq(new_keg_record.parent.realpath)
   end
 
@@ -152,7 +158,7 @@ RSpec.describe Migrator do
     tab.tabfile = HOMEBREW_CELLAR/"newname/0.1/INSTALL_RECEIPT.json"
     tab.source["path"] = "/path/that/must/be/changed/by/update_tabs"
     tab.write
-    migrator.update_tabs
+    subject.update_tabs
     expect(Tab.for_keg(new_keg_record).source["path"]).to eq(new_formula.path.to_s)
   end
 
@@ -162,7 +168,7 @@ RSpec.describe Migrator do
     tab.source["path"] = old_formula.path.to_s
     tab.write
 
-    migrator.migrate
+    subject.migrate
 
     expect(new_keg_record).to exist
     expect(old_keg_record.parent).to be_a_symlink
@@ -180,7 +186,7 @@ RSpec.describe Migrator do
     old_opt_record = HOMEBREW_PREFIX/"opt/oldname"
     old_opt_record.unlink if old_opt_record.symlink?
     old_opt_record.make_relative_symlink(new_keg_record)
-    migrator.unlink_oldname_opt
+    subject.unlink_oldname_opt
     expect(old_opt_record).not_to be_a_symlink
   end
 
@@ -189,7 +195,7 @@ RSpec.describe Migrator do
     keg.unlink
     keg.uninstall
     old_keg_record.parent.make_relative_symlink(new_keg_record.parent)
-    migrator.unlink_oldname_cellar
+    subject.unlink_oldname_cellar
     expect(old_keg_record.parent).not_to be_a_symlink
   end
 
@@ -197,7 +203,7 @@ RSpec.describe Migrator do
     (new_keg_record/"bin").mkpath
     keg.unlink
     keg.uninstall
-    migrator.backup_oldname_cellar
+    subject.backup_oldname_cellar
     expect(old_keg_record.subdirs).not_to be_empty
   end
 
@@ -206,7 +212,7 @@ RSpec.describe Migrator do
     tab.tabfile = HOMEBREW_CELLAR/"oldname/0.1/INSTALL_RECEIPT.json"
     tab.source["path"] = "/should/be/the/same"
     tab.write
-    migrator = described_class.new(new_formula, "oldname")
+    migrator = described_class.new(new_formula)
     tab.tabfile.delete
     migrator.backup_old_tabs
     expect(Tab.for_keg(old_keg_record).source["path"]).to eq("/should/be/the/same")
@@ -215,7 +221,7 @@ RSpec.describe Migrator do
   describe "#backup_oldname" do
     context "when cellar exists" do
       it "backs up the old name" do
-        migrator.backup_oldname
+        subject.backup_oldname
         expect(old_keg_record.parent).to be_a_directory
         expect(old_keg_record.parent.subdirs).not_to be_empty
         expect(HOMEBREW_LINKED_KEGS/"oldname").to exist
@@ -230,7 +236,7 @@ RSpec.describe Migrator do
         (new_keg_record/"bin").mkpath
         keg.unlink
         keg.uninstall
-        migrator.backup_oldname
+        subject.backup_oldname
         expect(old_keg_record.parent).to be_a_directory
         expect(old_keg_record.parent.subdirs).not_to be_empty
         expect(HOMEBREW_LINKED_KEGS/"oldname").to exist
@@ -246,7 +252,7 @@ RSpec.describe Migrator do
         keg.unlink
         keg.uninstall
         old_keg_record.parent.make_relative_symlink(new_keg_record.parent)
-        migrator.backup_oldname
+        subject.backup_oldname
         expect(old_keg_record.parent).to be_a_directory
         expect(old_keg_record.parent.subdirs).not_to be_empty
         expect(HOMEBREW_LINKED_KEGS/"oldname").to exist

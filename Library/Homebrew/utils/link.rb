@@ -1,11 +1,10 @@
-# typed: strict
 # frozen_string_literal: true
 
 module Utils
-  # Helper functions for creating symlinks.
   module Link
-    sig { params(src_dir: Pathname, dst_dir: Pathname, command: String, link_dir: T::Boolean).void }
-    def self.link_src_dst_dirs(src_dir, dst_dir, command, link_dir: false)
+    module_function
+
+    def link_src_dst_dirs(src_dir, dst_dir, command, link_dir: false)
       return unless src_dir.exist?
 
       conflicts = []
@@ -33,14 +32,12 @@ module Utils
         Could not link:
         #{conflicts.join("\n")}
 
-        Please delete these paths and run:
-          #{command}
+        Please delete these paths and run `#{command}`.
       EOS
     end
     private_class_method :link_src_dst_dirs
 
-    sig { params(src_dir: Pathname, dst_dir: Pathname, unlink_dir: T::Boolean).void }
-    def self.unlink_src_dst_dirs(src_dir, dst_dir, unlink_dir: false)
+    def unlink_src_dst_dirs(src_dir, dst_dir, unlink_dir: false)
       return unless src_dir.exist?
 
       src_paths = unlink_dir ? [src_dir] : src_dir.find
@@ -54,32 +51,27 @@ module Utils
     end
     private_class_method :unlink_src_dst_dirs
 
-    sig { params(path: Pathname, command: String).void }
-    def self.link_manpages(path, command)
+    def link_manpages(path, command)
       link_src_dst_dirs(path/"manpages", HOMEBREW_PREFIX/"share/man/man1", command)
     end
 
-    sig { params(path: Pathname).void }
-    def self.unlink_manpages(path)
+    def unlink_manpages(path)
       unlink_src_dst_dirs(path/"manpages", HOMEBREW_PREFIX/"share/man/man1")
     end
 
-    sig { params(path: Pathname, command: String).void }
-    def self.link_completions(path, command)
+    def link_completions(path, command)
       link_src_dst_dirs(path/"completions/bash", HOMEBREW_PREFIX/"etc/bash_completion.d", command)
       link_src_dst_dirs(path/"completions/zsh", HOMEBREW_PREFIX/"share/zsh/site-functions", command)
       link_src_dst_dirs(path/"completions/fish", HOMEBREW_PREFIX/"share/fish/vendor_completions.d", command)
     end
 
-    sig { params(path: Pathname).void }
-    def self.unlink_completions(path)
+    def unlink_completions(path)
       unlink_src_dst_dirs(path/"completions/bash", HOMEBREW_PREFIX/"etc/bash_completion.d")
       unlink_src_dst_dirs(path/"completions/zsh", HOMEBREW_PREFIX/"share/zsh/site-functions")
       unlink_src_dst_dirs(path/"completions/fish", HOMEBREW_PREFIX/"share/fish/vendor_completions.d")
     end
 
-    sig { params(path: Pathname, command: String).void }
-    def self.link_docs(path, command)
+    def link_docs(path, command)
       link_src_dst_dirs(path/"docs", HOMEBREW_PREFIX/"share/doc/homebrew", command, link_dir: true)
     end
   end

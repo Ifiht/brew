@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
 require "cmd/shared_examples/args_parse"
-require "cmd/upgrade"
 
-RSpec.describe Homebrew::Cmd::UpgradeCmd do
+describe "Homebrew.upgrade_args" do
   it_behaves_like "parseable arguments"
+end
 
-  it "upgrades a Formula and cleans up old versions", :integration_test do
+describe "brew upgrade", :integration_test do
+  it "upgrades a Formula and cleans up old versions" do
     setup_test_formula "testball"
     (HOMEBREW_CELLAR/"testball/0.0.1/foo").mkpath
 

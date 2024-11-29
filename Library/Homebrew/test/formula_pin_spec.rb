@@ -2,11 +2,11 @@
 
 require "formula_pin"
 
-RSpec.describe FormulaPin do
-  subject(:formula_pin) { described_class.new(formula) }
+describe FormulaPin do
+  subject { described_class.new(formula) }
 
   let(:name) { "double" }
-  let(:formula) { instance_double(Formula, name:, rack: HOMEBREW_CELLAR/name) }
+  let(:formula) { double(Formula, name: name, rack: HOMEBREW_CELLAR/name) }
 
   before do
     formula.rack.mkpath
@@ -21,24 +21,24 @@ RSpec.describe FormulaPin do
   end
 
   it "is not pinnable by default" do
-    expect(formula_pin).not_to be_pinnable
+    expect(subject).not_to be_pinnable
   end
 
   it "is pinnable if the Keg exists" do
     (formula.rack/"0.1").mkpath
-    expect(formula_pin).to be_pinnable
+    expect(subject).to be_pinnable
   end
 
   specify "#pin and #unpin" do
     (formula.rack/"0.1").mkpath
 
-    formula_pin.pin
-    expect(formula_pin).to be_pinned
+    subject.pin
+    expect(subject).to be_pinned
     expect(HOMEBREW_PINNED_KEGS/name).to be_a_directory
     expect(HOMEBREW_PINNED_KEGS.children.count).to eq(1)
 
-    formula_pin.unpin
-    expect(formula_pin).not_to be_pinned
+    subject.unpin
+    expect(subject).not_to be_pinned
     expect(HOMEBREW_PINNED_KEGS).not_to be_a_directory
   end
 end

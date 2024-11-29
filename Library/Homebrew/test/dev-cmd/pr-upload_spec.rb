@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
 require "cmd/shared_examples/args_parse"
-require "dev-cmd/pr-upload"
 
-RSpec.describe Homebrew::DevCmd::PrUpload do
+describe "Homebrew.pr_upload_args" do
   it_behaves_like "parseable arguments"
 end

@@ -1,55 +1,57 @@
 # frozen_string_literal: true
 
-RSpec.describe Cask::CaskLoader::FromContentLoader do
-  describe "::try_new" do
-    it "returns a loader for Casks specified with `cask \"token\" do … end`" do
-      expect(described_class.try_new(<<~RUBY)).not_to be_nil
+describe Cask::CaskLoader::FromContentLoader do
+  alias_matcher :be_able_to_load, :be_can_load
+
+  describe "::can_load?" do
+    it "returns true for Casks specified with `cask \"token\" do … end`" do
+      expect(described_class).to be_able_to_load <<~RUBY
         cask "token" do
         end
       RUBY
     end
 
-    it "returns a loader for Casks specified with `cask \"token\" do; end`" do
-      expect(described_class.try_new(<<~RUBY)).not_to be_nil
+    it "returns true for Casks specified with `cask \"token\" do; end`" do
+      expect(described_class).to be_able_to_load <<~RUBY
         cask "token" do; end
       RUBY
     end
 
-    it "returns a loader for Casks specified with `cask 'token' do … end`" do
-      expect(described_class.try_new(<<~RUBY)).not_to be_nil
+    it "returns true for Casks specified with `cask 'token' do … end`" do
+      expect(described_class).to be_able_to_load <<~RUBY
         cask 'token' do
         end
       RUBY
     end
 
-    it "returns a loader for Casks specified with `cask 'token' do; end`" do
-      expect(described_class.try_new(<<~RUBY)).not_to be_nil
+    it "returns true for Casks specified with `cask 'token' do; end`" do
+      expect(described_class).to be_able_to_load <<~RUBY
         cask 'token' do; end
       RUBY
     end
 
-    it "returns a loader for Casks specified with `cask(\"token\") { … }`" do
-      expect(described_class.try_new(<<~RUBY)).not_to be_nil
+    it "returns true for Casks specified with `cask(\"token\") { … }`" do
+      expect(described_class).to be_able_to_load <<~RUBY
         cask("token") {
         }
       RUBY
     end
 
-    it "returns a loader for Casks specified with `cask(\"token\") {}`" do
-      expect(described_class.try_new(<<~RUBY)).not_to be_nil
+    it "returns true for Casks specified with `cask(\"token\") {}`" do
+      expect(described_class).to be_able_to_load <<~RUBY
         cask("token") {}
       RUBY
     end
 
-    it "returns a loader for Casks specified with `cask('token') { … }`" do
-      expect(described_class.try_new(<<~RUBY)).not_to be_nil
+    it "returns true for Casks specified with `cask('token') { … }`" do
+      expect(described_class).to be_able_to_load <<~RUBY
         cask('token') {
         }
       RUBY
     end
 
-    it "returns a loader for Casks specified with `cask('token') {}`" do
-      expect(described_class.try_new(<<~RUBY)).not_to be_nil
+    it "returns true for Casks specified with `cask('token') {}`" do
+      expect(described_class).to be_able_to_load <<~RUBY
         cask('token') {}
       RUBY
     end

@@ -1,14 +1,12 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
 require "cask/artifact/symlinked"
 
 module Cask
   module Artifact
-    # Artifact corresponding to the `binary` stanza.
     class Binary < Symlinked
       def link(command: nil, **options)
-        super
+        super(command: command, **options)
         return if source.executable?
 
         if source.writable?

@@ -2,32 +2,23 @@
 
 require "formula"
 
-RSpec.describe "patching", type: :system do
-  let(:formula_subclass) do
-    Class.new(Formula) do
-      # These are defined within an anonymous class to avoid polluting the global namespace.
-      # rubocop:disable RSpec/LeakyConstantDeclaration,Lint/ConstantDefinitionInBlock
-      TESTBALL_URL = "file://#{TEST_FIXTURE_DIR}/tarballs/testball-0.1.tbz".freeze
-      TESTBALL_PATCHES_URL = "file://#{TEST_FIXTURE_DIR}/tarballs/testball-0.1-patches.tgz".freeze
-      PATCH_URL_A = "file://#{TEST_FIXTURE_DIR}/patches/noop-a.diff".freeze
-      PATCH_URL_B = "file://#{TEST_FIXTURE_DIR}/patches/noop-b.diff".freeze
-      PATCH_URL_D = "file://#{TEST_FIXTURE_DIR}/patches/noop-d.diff".freeze
-      PATCH_A_CONTENTS = File.read("#{TEST_FIXTURE_DIR}/patches/noop-a.diff").freeze
-      PATCH_B_CONTENTS = File.read("#{TEST_FIXTURE_DIR}/patches/noop-b.diff").freeze
-      APPLY_A = "noop-a.diff"
-      APPLY_B = "noop-b.diff"
-      APPLY_C = "noop-c.diff"
-      APPLY_D = "noop-d.diff"
-      # rubocop:enable RSpec/LeakyConstantDeclaration,Lint/ConstantDefinitionInBlock
-
-      url TESTBALL_URL
-      sha256 TESTBALL_SHA256
-    end
-  end
+describe "patching" do
+  TESTBALL_URL = "file://#{TEST_FIXTURE_DIR}/tarballs/testball-0.1.tbz"
+  TESTBALL_PATCHES_URL = "file://#{TEST_FIXTURE_DIR}/tarballs/testball-0.1-patches.tgz"
+  PATCH_URL_A = "file://#{TEST_FIXTURE_DIR}/patches/noop-a.diff"
+  PATCH_URL_B = "file://#{TEST_FIXTURE_DIR}/patches/noop-b.diff"
+  PATCH_A_CONTENTS = File.read("#{TEST_FIXTURE_DIR}/patches/noop-a.diff").freeze
+  PATCH_B_CONTENTS = File.read("#{TEST_FIXTURE_DIR}/patches/noop-b.diff").freeze
+  APPLY_A = "noop-a.diff"
+  APPLY_B = "noop-b.diff"
+  APPLY_C = "noop-c.diff"
 
   def formula(name = "formula_name", path: Formulary.core_path(name), spec: :stable, alias_path: nil, &block)
-    formula_subclass.class_eval(&block)
-    formula_subclass.new(name, path, spec, alias_path:)
+    Class.new(Formula) {
+      url TESTBALL_URL
+      sha256 TESTBALL_SHA256
+      class_eval(&block)
+    }.new(name, path, spec, alias_path: alias_path)
   end
 
   matcher :be_patched do
@@ -37,18 +28,6 @@ RSpec.describe "patching", type: :system do
         s = File.read("libexec/NOOP")
         expect(s).not_to include("NOOP"), "libexec/NOOP was not patched as expected"
         expect(s).to include("ABCD"), "libexec/NOOP was not patched as expected"
-      end
-    end
-  end
-
-  matcher :be_patched_with_homebrew_prefix do
-    match do |formula|
-      formula.brew do
-        formula.patch
-        s = File.read("libexec/NOOP")
-        expect(s).not_to include("NOOP"), "libexec/NOOP was not patched as expected"
-        expect(s).not_to include("@@HOMEBREW_PREFIX@@"), "libexec/NOOP was not patched as expected"
-        expect(s).to include(HOMEBREW_PREFIX.to_s), "libexec/NOOP was not patched as expected"
       end
     end
   end
@@ -78,11 +57,11 @@ RSpec.describe "patching", type: :system do
 
   matcher :miss_apply do
     match do |formula|
-      expect do
+      expect {
         formula.brew do
           formula.patch
         end
-      end.to raise_error(MissingApplyError)
+      }.to raise_error(MissingApplyError)
     end
   end
 
@@ -161,7 +140,7 @@ RSpec.describe "patching", type: :system do
   end
 
   specify "single_patch_dsl_with_incorrect_strip" do
-    expect do
+    expect {
       f = formula do
         patch :p0 do
           url PATCH_URL_A
@@ -170,11 +149,11 @@ RSpec.describe "patching", type: :system do
       end
 
       f.brew { |formula, _staging| formula.patch }
-    end.to raise_error(BuildError)
+    }.to raise_error(ErrorDuringExecution)
   end
 
   specify "single_patch_dsl_with_incorrect_strip_with_apply" do
-    expect do
+    expect {
       f = formula do
         patch :p0 do
           url TESTBALL_PATCHES_URL
@@ -184,7 +163,7 @@ RSpec.describe "patching", type: :system do
       end
 
       f.brew { |formula, _staging| formula.patch }
-    end.to raise_error(BuildError)
+    }.to raise_error(ErrorDuringExecution)
   end
 
   specify "patch_p0_dsl" do
@@ -230,7 +209,7 @@ RSpec.describe "patching", type: :system do
   end
 
   specify "single_patch_dsl_with_apply_enoent_fail" do
-    expect do
+    expect {
       f = formula do
         patch do
           url TESTBALL_PATCHES_URL
@@ -240,17 +219,18 @@ RSpec.describe "patching", type: :system do
       end
 
       f.brew { |formula, _staging| formula.patch }
-    end.to raise_error(Errno::ENOENT)
-  end
-
-  specify "patch_dsl_with_homebrew_prefix" do
-    expect(
-      formula do
-        patch do
-          url PATCH_URL_D
-          sha256 PATCH_D_SHA256
-        end
-      end,
-    ).to be_patched_with_homebrew_prefix
+    }.to raise_error(ErrorDuringExecution)
   end
 end
+
+__END__
+diff --git a/libexec/NOOP b/libexec/NOOP
+index bfdda4c..e08d8f4 100755
+--- a/libexec/NOOP
++++ b/libexec/NOOP
+@@ -1,2 +1,2 @@
+ #!/bin/bash
+-echo NOOP
+\ No newline at end of file
++echo ABCD
+\ No newline at end of file

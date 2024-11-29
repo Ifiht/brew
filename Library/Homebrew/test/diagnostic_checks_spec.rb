@@ -2,12 +2,27 @@
 
 require "diagnostic"
 
-RSpec.describe Homebrew::Diagnostic::Checks do
-  subject(:checks) { described_class.new }
-
+describe Homebrew::Diagnostic::Checks do
   specify "#inject_file_list" do
-    expect(checks.inject_file_list([], "foo:\n")).to eq("foo:\n")
-    expect(checks.inject_file_list(%w[/a /b], "foo:\n")).to eq("foo:\n  /a\n  /b\n")
+    expect(subject.inject_file_list([], "foo:\n")).to eq("foo:\n")
+    expect(subject.inject_file_list(%w[/a /b], "foo:\n")).to eq("foo:\n  /a\n  /b\n")
+  end
+
+  specify "#check_for_anaconda" do
+    mktmpdir do |path|
+      anaconda = "#{path}/anaconda"
+      python = "#{path}/python"
+      FileUtils.touch anaconda
+      File.open(python, "w") do |file|
+        file.write("#! #{`which bash`}\necho -n '#{python}'\n")
+      end
+      FileUtils.chmod 0755, anaconda
+      FileUtils.chmod 0755, python
+
+      ENV["PATH"] = "#{path}#{File::PATH_SEPARATOR}#{ENV["PATH"]}"
+
+      expect(subject.check_for_anaconda).to match("Anaconda")
+    end
   end
 
   specify "#check_access_directories" do
@@ -24,7 +39,7 @@ RSpec.describe Homebrew::Diagnostic::Checks do
       dirs.each do |dir|
         modes[dir] = dir.stat.mode & 0777
         dir.chmod 0555
-        expect(checks.check_access_directories).to match(dir.to_s)
+        expect(subject.check_access_directories).to match(dir.to_s)
       end
     ensure
       modes.each do |dir, mode|
@@ -44,43 +59,54 @@ RSpec.describe Homebrew::Diagnostic::Checks do
     # HOMEBREW_PREFIX/bin/
     (bin/File.basename(Dir["/usr/bin/*"].first)).mkpath
 
-    expect(checks.check_user_path_1)
+    expect(subject.check_user_path_1)
       .to match("/usr/bin occurs before #{HOMEBREW_PREFIX}/bin")
   end
 
   specify "#check_user_path_2" do
     ENV["PATH"] = ENV["PATH"].gsub \
-      %r{(?:^|#{File::PATH_SEPARATOR})#{HOMEBREW_PREFIX}/bin}o, ""
+      %r{(?:^|#{File::PATH_SEPARATOR})#{HOMEBREW_PREFIX}/bin}, ""
 
-    expect(checks.check_user_path_1).to be_nil
-    expect(checks.check_user_path_2)
-      .to match("Homebrew's \"bin\" was not found in your PATH.")
+    expect(subject.check_user_path_1).to be nil
+    expect(subject.check_user_path_2)
+      .to match("Homebrew's bin was not found in your PATH.")
   end
 
   specify "#check_user_path_3" do
     sbin = HOMEBREW_PREFIX/"sbin"
-    (sbin/"something").mkpath
-
-    homebrew_path =
+    ENV["HOMEBREW_PATH"] =
       "#{HOMEBREW_PREFIX}/bin#{File::PATH_SEPARATOR}" +
       ENV["HOMEBREW_PATH"].gsub(/(?:^|#{Regexp.escape(File::PATH_SEPARATOR)})#{Regexp.escape(sbin)}/, "")
-    stub_const("ORIGINAL_PATHS", PATH.new(homebrew_path).filter_map { |path| Pathname.new(path).expand_path })
+    (sbin/"something").mkpath
 
-    expect(checks.check_user_path_1).to be_nil
-    expect(checks.check_user_path_2).to be_nil
-    expect(checks.check_user_path_3)
-      .to match("Homebrew's \"sbin\" was not found in your PATH")
+    expect(subject.check_user_path_1).to be nil
+    expect(subject.check_user_path_2).to be nil
+    expect(subject.check_user_path_3)
+      .to match("Homebrew's sbin was not found in your PATH")
   ensure
-    FileUtils.rm_rf(sbin)
+    sbin.rmtree
+  end
+
+  specify "#check_for_config_scripts" do
+    mktmpdir do |path|
+      file = "#{path}/foo-config"
+      FileUtils.touch file
+      FileUtils.chmod 0755, file
+      ENV["HOMEBREW_PATH"] = ENV["PATH"] =
+        "#{path}#{File::PATH_SEPARATOR}#{ENV["PATH"]}"
+
+      expect(subject.check_for_config_scripts)
+        .to match('"config" scripts exist')
+    end
   end
 
   specify "#check_for_symlinked_cellar" do
-    FileUtils.rm_r(HOMEBREW_CELLAR)
+    HOMEBREW_CELLAR.rmtree
 
     mktmpdir do |path|
       FileUtils.ln_s path, HOMEBREW_CELLAR
 
-      expect(checks.check_for_symlinked_cellar).to match(path)
+      expect(subject.check_for_symlinked_cellar).to match(path)
     end
   ensure
     HOMEBREW_CELLAR.unlink
@@ -89,7 +115,7 @@ RSpec.describe Homebrew::Diagnostic::Checks do
 
   specify "#check_tmpdir" do
     ENV["TMPDIR"] = "/i/don/t/exis/t"
-    expect(checks.check_tmpdir).to match("doesn't exist")
+    expect(subject.check_tmpdir).to match("doesn't exist")
   end
 
   specify "#check_for_external_cmd_name_conflict" do
@@ -101,9 +127,9 @@ RSpec.describe Homebrew::Diagnostic::Checks do
           FileUtils.chmod 0755, cmd
         end
 
-        allow(Commands).to receive(:tap_cmd_directories).and_return([path1, path2])
+        allow(Tap).to receive(:cmd_directories).and_return([path1, path2])
 
-        expect(checks.check_for_external_cmd_name_conflict)
+        expect(subject.check_for_external_cmd_name_conflict)
           .to match("brew-foo")
       end
     end
@@ -111,25 +137,7 @@ RSpec.describe Homebrew::Diagnostic::Checks do
 
   specify "#check_homebrew_prefix" do
     allow(Homebrew).to receive(:default_prefix?).and_return(false)
-    expect(checks.check_homebrew_prefix)
+    expect(subject.check_homebrew_prefix)
       .to match("Your Homebrew's prefix is not #{Homebrew::DEFAULT_PREFIX}")
-  end
-
-  specify "#check_for_unnecessary_core_tap" do
-    ENV.delete("HOMEBREW_DEVELOPER")
-    ENV.delete("HOMEBREW_NO_INSTALL_FROM_API")
-
-    expect_any_instance_of(CoreTap).to receive(:installed?).and_return(true)
-
-    expect(checks.check_for_unnecessary_core_tap).to match("You have an unnecessary local Core tap")
-  end
-
-  specify "#check_for_unnecessary_cask_tap" do
-    ENV.delete("HOMEBREW_DEVELOPER")
-    ENV.delete("HOMEBREW_NO_INSTALL_FROM_API")
-
-    expect_any_instance_of(CoreCaskTap).to receive(:installed?).and_return(true)
-
-    expect(checks.check_for_unnecessary_cask_tap).to match("unnecessary local Cask tap")
   end
 end

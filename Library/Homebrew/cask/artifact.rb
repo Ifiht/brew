@@ -1,4 +1,3 @@
-# typed: strict
 # frozen_string_literal: true
 
 require "cask/artifact/app"
@@ -11,7 +10,6 @@ require "cask/artifact/font"
 require "cask/artifact/input_method"
 require "cask/artifact/installer"
 require "cask/artifact/internet_plugin"
-require "cask/artifact/keyboard_layout"
 require "cask/artifact/manpage"
 require "cask/artifact/vst_plugin"
 require "cask/artifact/vst3_plugin"
@@ -29,7 +27,6 @@ require "cask/artifact/uninstall"
 require "cask/artifact/zap"
 
 module Cask
-  # Module containing all cask artifact classes.
   module Artifact
   end
 end

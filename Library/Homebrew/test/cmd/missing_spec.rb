@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
-require "cmd/missing"
 require "cmd/shared_examples/args_parse"
 
-RSpec.describe Homebrew::Cmd::Missing do
+describe "Homebrew.missing_args" do
   it_behaves_like "parseable arguments"
+end
 
-  it "prints missing dependencies", :integration_test do
+describe "brew missing", :integration_test do
+  it "prints missing dependencies" do
     setup_test_formula "foo"
     setup_test_formula "bar"
 

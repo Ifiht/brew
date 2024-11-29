@@ -2,7 +2,7 @@
 
 require "PATH"
 
-RSpec.describe PATH do
+describe PATH do
   describe "#initialize" do
     it "can take multiple arguments" do
       expect(described_class.new("/path1", "/path2")).to eq("/path1:/path2")
@@ -124,7 +124,7 @@ RSpec.describe PATH do
     end
 
     it "returns nil instead of an empty #{described_class}" do
-      expect(described_class.new.existing).to be_nil
+      expect(described_class.new.existing).to be nil
     end
   end
 end

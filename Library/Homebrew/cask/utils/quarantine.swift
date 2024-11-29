@@ -2,46 +2,46 @@
 
 import Foundation
 
-struct SwiftErr: TextOutputStream {
-    public static var stream = SwiftErr()
-
-    mutating func write(_ string: String) {
-        fputs(string, stderr)
-    }
+struct swifterr: TextOutputStream {
+  public static var stream = swifterr()
+  mutating func write(_ string: String) { fputs(string, stderr) }
 }
 
-// TODO: tell which arguments have to be provided
-guard CommandLine.arguments.count >= 4 else {
+if #available(macOS 10.10, *) {
+  if (CommandLine.arguments.count < 4) {
     exit(2)
-}
+  }
 
-var dataLocationURL = URL(fileURLWithPath: CommandLine.arguments[1])
+  let dataLocationUrl: NSURL = NSURL.init(fileURLWithPath: CommandLine.arguments[1])
 
-let quarantineProperties: [String: Any] = [
+  var errorBag: NSError?
+
+  let quarantineProperties: [String: Any] = [
     kLSQuarantineAgentNameKey as String: "Homebrew Cask",
     kLSQuarantineTypeKey as String: kLSQuarantineTypeWebDownload,
     kLSQuarantineDataURLKey as String: CommandLine.arguments[2],
     kLSQuarantineOriginURLKey as String: CommandLine.arguments[3]
-]
+  ]
 
-// Check for if the data location URL is reachable
-do {
-    let isDataLocationURLReachable = try dataLocationURL.checkResourceIsReachable()
-    guard isDataLocationURLReachable else {
-        print("URL \(dataLocationURL.path) is not reachable. Not proceeding.", to: &SwiftErr.stream)
-        exit(1)
+  if (dataLocationUrl.checkResourceIsReachableAndReturnError(&errorBag)) {
+    do {
+      try dataLocationUrl.setResourceValue(
+        quarantineProperties as NSDictionary,
+        forKey: URLResourceKey.quarantinePropertiesKey
+        )
     }
-} catch {
-    print(error.localizedDescription, to: &SwiftErr.stream)
-    exit(1)
-}
+    catch {
+      print(error.localizedDescription, to: &swifterr.stream)
+      exit(1)
+    }
+  }
+  else {
+    print(errorBag!.localizedDescription, to: &swifterr.stream)
+    exit(3)
+  }
 
-// Quarantine the file
-do {
-    var resourceValues = URLResourceValues()
-    resourceValues.quarantineProperties = quarantineProperties
-    try dataLocationURL.setResourceValues(resourceValues)
-} catch {
-    print(error.localizedDescription, to: &SwiftErr.stream)
-    exit(1)
+  exit(0)
+}
+else {
+  exit(5)
 }

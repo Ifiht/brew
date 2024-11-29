@@ -1,16 +1,13 @@
 # frozen_string_literal: true
 
-require "cmd/update-report"
 require "description_cache_store"
 
-RSpec.describe DescriptionCacheStore do
+describe DescriptionCacheStore do
   subject(:cache_store) { described_class.new(database) }
 
-  let(:database) { instance_double(CacheStoreDatabase, "database") }
+  let(:database) { double("database") }
   let(:formula_name) { "test_name" }
   let(:description) { "test_description" }
-
-  before { allow(Homebrew::EnvConfig).to receive(:eval_all?).and_return(true) }
 
   describe "#update!" do
     it "sets the formula description" do
@@ -27,7 +24,7 @@ RSpec.describe DescriptionCacheStore do
   end
 
   describe "#update_from_report!" do
-    let(:report) { instance_double(ReporterHub, select_formula_or_cask: [], empty?: false) }
+    let(:report) { double(select_formula: [], empty?: false) }
 
     it "reads from the report" do
       expect(database).to receive(:empty?).at_least(:once).and_return(false)
@@ -53,36 +50,6 @@ RSpec.describe DescriptionCacheStore do
       expect(database).to receive(:empty?).and_return(false)
       expect(database).to receive(:delete).with(formula_name)
       cache_store.delete_from_formula_names!([formula_name])
-    end
-  end
-
-  describe CaskDescriptionCacheStore do
-    subject(:cache_store) { described_class.new(database) }
-
-    let(:database) { instance_double(CacheStoreDatabase, "database") }
-
-    describe "#update_from_report!" do
-      let(:report) { instance_double(ReporterHub, select_formula_or_cask: [], empty?: false) }
-
-      it "reads from the report" do
-        expect(database).to receive(:empty?).at_least(:once).and_return(false)
-        cache_store.update_from_report!(report)
-      end
-    end
-
-    describe "#update_from_cask_tokens!" do
-      it "sets the cask descriptions" do
-        c = Cask::Cask.new("cask-names-desc") do
-          url "url-1"
-          name "Name 1"
-          name "Name 2"
-          desc "description"
-        end
-        expect(Cask::CaskLoader).to receive(:load).with("cask-names-desc", any_args).and_return(c)
-        expect(database).to receive(:empty?).and_return(false)
-        expect(database).to receive(:set).with(c.full_name, [c.name.join(", "), c.desc.presence])
-        cache_store.update_from_cask_tokens!([c.token])
-      end
     end
   end
 end

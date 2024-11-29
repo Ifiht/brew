@@ -1,10 +1,8 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
 require "resource"
 require "erb"
 
-# Helper module for creating patches.
 module Patch
   def self.create(strip, src, &block)
     case strip
@@ -24,12 +22,36 @@ module Patch
     when nil
       raise ArgumentError, "nil value for strip"
     else
-      raise ArgumentError, "Unexpected value #{strip.inspect} for strip"
+      raise ArgumentError, "unexpected value #{strip.inspect} for strip"
     end
+  end
+
+  def self.normalize_legacy_patches(list)
+    patches = []
+
+    case list
+    when Hash
+      list
+    when Array, String, :DATA
+      { p1: list }
+    else
+      {}
+    end.each_pair do |strip, urls|
+      Array(urls).each do |url|
+        patch = case url
+        when :DATA
+          DATAPatch.new(strip)
+        else
+          LegacyPatch.new(strip, url)
+        end
+        patches << patch
+      end
+    end
+
+    patches
   end
 end
 
-# An abstract class representing a patch embedded into a formula.
 class EmbeddedPatch
   attr_writer :owner
   attr_reader :strip
@@ -38,7 +60,6 @@ class EmbeddedPatch
     @strip = strip
   end
 
-  sig { returns(T::Boolean) }
   def external?
     false
   end
@@ -51,13 +72,11 @@ class EmbeddedPatch
     Utils.safe_popen_write("patch", *args) { |p| p.write(data) }
   end
 
-  sig { returns(String) }
   def inspect
     "#<#{self.class.name}: #{strip.inspect}>"
   end
 end
 
-# A patch at the `__END__` of a formula file.
 class DATAPatch < EmbeddedPatch
   attr_accessor :path
 
@@ -66,15 +85,14 @@ class DATAPatch < EmbeddedPatch
     @path = nil
   end
 
-  sig { returns(String) }
   def contents
     data = +""
     path.open("rb") do |f|
       loop do
         line = f.gets
-        break if line.nil? || /^__END__$/.match?(line)
+        break if line.nil? || line =~ /^__END__$/
       end
-      while (line = f.gets)
+      while line = f.gets
         data << line
       end
     end
@@ -82,7 +100,6 @@ class DATAPatch < EmbeddedPatch
   end
 end
 
-# A string containing a patch.
 class StringPatch < EmbeddedPatch
   def initialize(strip, str)
     super(strip)
@@ -94,7 +111,6 @@ class StringPatch < EmbeddedPatch
   end
 end
 
-# A file containing a patch.
 class ExternalPatch
   extend Forwardable
 
@@ -106,17 +122,16 @@ class ExternalPatch
 
   def initialize(strip, &block)
     @strip    = strip
-    @resource = Resource::Patch.new(&block)
+    @resource = Resource::PatchResource.new(&block)
   end
 
-  sig { returns(T::Boolean) }
   def external?
     true
   end
 
   def owner=(owner)
-    resource.owner = owner
-    resource.version(resource.checksum&.hexdigest || ERB::Util.url_encode(resource.url))
+    resource.owner   = owner
+    resource.version = resource.checksum || ERB::Util.url_encode(resource.url)
   end
 
   def apply
@@ -125,14 +140,14 @@ class ExternalPatch
       patch_dir = Pathname.pwd
       if patch_files.empty?
         children = patch_dir.children
-        if children.length != 1 || !children.fetch(0).file?
+        if children.length != 1 || !children.first.file?
           raise MissingApplyError, <<~EOS
             There should be exactly one patch file in the staging directory unless
             the "apply" method was used one or more times in the patch-do block.
           EOS
         end
 
-        patch_files << children.fetch(0).basename
+        patch_files << children.first.basename
       end
       dir = base_dir
       dir /= resource.directory if resource.directory.present?
@@ -140,23 +155,38 @@ class ExternalPatch
         patch_files.each do |patch_file|
           ohai "Applying #{patch_file}"
           patch_file = patch_dir/patch_file
-          Utils.safe_popen_write("patch", "-g", "0", "-f", "-#{strip}") do |p|
-            File.foreach(patch_file) do |line|
-              data = line.gsub("@@HOMEBREW_PREFIX@@", HOMEBREW_PREFIX)
-              p.write(data)
-            end
-          end
+          safe_system "patch", "-g", "0", "-f", "-#{strip}", "-i", patch_file
         end
       end
     end
-  rescue ErrorDuringExecution => e
-    f = resource.owner.owner
-    cmd, *args = e.cmd
-    raise BuildError.new(f, cmd, args, ENV.to_hash)
   end
 
-  sig { returns(String) }
   def inspect
     "#<#{self.class.name}: #{strip.inspect} #{url.inspect}>"
+  end
+end
+
+# Legacy patches have no checksum and are not cached.
+class LegacyPatch < ExternalPatch
+  def initialize(strip, url)
+    odeprecated "legacy patches", "'patch do' blocks"
+    super(strip)
+    resource.url(url)
+    resource.download_strategy = CurlDownloadStrategy
+  end
+
+  def fetch
+    clear_cache
+    super
+  end
+
+  def verify_download_integrity(_fn)
+    # no-op
+  end
+
+  def apply
+    super
+  ensure
+    clear_cache
   end
 end

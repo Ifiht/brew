@@ -2,12 +2,12 @@
 
 require "lazy_object"
 
-RSpec.describe LazyObject do
+describe LazyObject do
   describe "#initialize" do
     it "does not evaluate the block" do
-      expect do |block|
+      expect { |block|
         described_class.new(&block)
-      end.not_to yield_control
+      }.not_to yield_control
     end
   end
 

@@ -2,7 +2,7 @@
 
 require_relative "shared_examples"
 
-RSpec.describe UnpackStrategy::Gzip do
+describe UnpackStrategy::Gzip do
   let(:path) { TEST_FIXTURE_DIR/"cask/container.gz" }
 
   include_examples "UnpackStrategy::detect"

@@ -1,28 +1,23 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
+require "resource"
+require "metafiles"
+
 module DiskUsageExtension
-  extend T::Helpers
-
-  requires_ancestor { Pathname }
-
-  sig { returns(Integer) }
   def disk_usage
-    return @disk_usage if defined?(@disk_usage)
+    return @disk_usage if @disk_usage
 
     compute_disk_usage
     @disk_usage
   end
 
-  sig { returns(Integer) }
   def file_count
-    return @file_count if defined?(@file_count)
+    return @file_count if @file_count
 
     compute_disk_usage
     @file_count
   end
 
-  sig { returns(String) }
   def abv
     out = +""
     compute_disk_usage
@@ -33,7 +28,6 @@ module DiskUsageExtension
 
   private
 
-  sig { void }
   def compute_disk_usage
     if symlink? && !exist?
       @file_count = 1
@@ -73,23 +67,15 @@ module DiskUsageExtension
   end
 end
 
-require "system_command"
-
 # Homebrew extends Ruby's `Pathname` to make our code more readable.
-# @see https://ruby-doc.org/stdlib-2.6.3/libdoc/pathname/rdoc/Pathname.html Ruby's Pathname API
+# @see https://ruby-doc.org/stdlib-1.8.7/libdoc/pathname/rdoc/Pathname.html Ruby's Pathname API
 class Pathname
-  include SystemCommand::Mixin
   include DiskUsageExtension
 
+  # @private
+  BOTTLE_EXTNAME_RX = /(\.[a-z0-9_]+\.bottle\.(\d+\.)?tar\.gz)$/.freeze
+
   # Moves a file from the original location to the {Pathname}'s.
-  #
-  # @api public
-  sig {
-    params(sources: T.any(
-      Resource, Resource::Partial, String, Pathname,
-      T::Array[T.any(String, Pathname)], T::Hash[T.any(String, Pathname), String]
-    )).void
-  }
   def install(*sources)
     sources.each do |src|
       case src
@@ -99,13 +85,13 @@ class Pathname
         src.resource.stage { install(*src.files) }
       when Array
         if src.empty?
-          opoo "Tried to install empty array to #{self}"
+          opoo "tried to install empty array to #{self}"
           break
         end
         src.each { |s| install_p(s, File.basename(s)) }
       when Hash
         if src.empty?
-          opoo "Tried to install empty hash to #{self}"
+          opoo "tried to install empty hash to #{self}"
           break
         end
         src.each { |s, new_basename| install_p(s, new_basename) }
@@ -115,24 +101,22 @@ class Pathname
     end
   end
 
-  sig { params(src: T.any(String, Pathname), new_basename: String).void }
   def install_p(src, new_basename)
-    src = Pathname(src)
-    raise Errno::ENOENT, src.to_s if !src.symlink? && !src.exist?
+    raise Errno::ENOENT, src.to_s unless File.symlink?(src) || File.exist?(src)
 
+    src = Pathname(src)
     dst = join(new_basename)
     dst = yield(src, dst) if block_given?
     return unless dst
 
     mkpath
 
-    # Use `FileUtils.mv` over `File.rename` to handle filesystem boundaries. If `src`
-    # is a symlink and its target is moved first, `FileUtils.mv` will fail
-    # (https://bugs.ruby-lang.org/issues/7707).
-    #
-    # In that case, use the system `mv` command.
+    # Use FileUtils.mv over File.rename to handle filesystem boundaries. If src
+    # is a symlink, and its target is moved first, FileUtils.mv will fail:
+    #   https://bugs.ruby-lang.org/issues/7707
+    # In that case, use the system "mv" command.
     if src.symlink?
-      raise unless Kernel.system "mv", src.to_s, dst
+      raise unless Kernel.system "mv", src, dst
     else
       FileUtils.mv src, dst
     end
@@ -140,13 +124,6 @@ class Pathname
   private :install_p
 
   # Creates symlinks to sources in this folder.
-  #
-  # @api public
-  sig {
-    params(
-      sources: T.any(String, Pathname, T::Array[T.any(String, Pathname)], T::Hash[T.any(String, Pathname), String]),
-    ).void
-  }
   def install_symlink(*sources)
     sources.each do |src|
       case src
@@ -169,25 +146,26 @@ class Pathname
   end
   private :install_symlink_p
 
-  # Only appends to a file that is already created.
-  #
-  # @api public
-  sig { params(content: String, open_args: T.untyped).void }
-  def append_lines(content, **open_args)
-    raise "Cannot append file that doesn't exist: #{self}" unless exist?
+  # @private
+  alias old_write write
 
-    T.unsafe(self).open("a", **open_args) { |f| f.puts(content) }
+  # We assume this pathname object is a file, obviously
+  def write(content, *open_args)
+    raise "Will not overwrite #{self}" if exist?
+
+    dirname.mkpath
+    open("w", *open_args) { |f| f.write(content) }
   end
 
-  # Write to a file atomically.
-  #
-  # NOTE: This always overwrites.
-  #
-  # @api public
-  sig { params(content: String).void }
-  def atomic_write(content)
-    require "extend/file/atomic"
+  # Only appends to a file that is already created.
+  def append_lines(content, *open_args)
+    raise "Cannot append file that doesn't exist: #{self}" unless exist?
 
+    open("a", *open_args) { |f| f.puts(content) }
+  end
+
+  # NOTE: This always overwrites.
+  def atomic_write(content)
     old_stat = stat if exist?
     File.atomic_write(self) do |file|
       file.write(content)
@@ -206,7 +184,6 @@ class Pathname
       # Changing file ownership failed, moving on.
       nil
     end
-
     begin
       # This operation will affect filesystem ACL's
       chmod(old_stat.mode)
@@ -216,6 +193,7 @@ class Pathname
     end
   end
 
+  # @private
   def cp_path_sub(pattern, replacement)
     raise "#{self} does not exist" unless exist?
 
@@ -232,17 +210,17 @@ class Pathname
     end
   end
 
-  # Extended to support common double extensions.
-  #
-  # @api public
-  sig { returns(String) }
-  def extname
-    basename = File.basename(self)
+  # @private
+  alias extname_old extname
 
-    bottle_ext, = HOMEBREW_BOTTLES_EXTNAME_REGEX.match(basename).to_a
+  # Extended to support common double extensions
+  def extname(path = to_s)
+    basename = File.basename(path)
+
+    bottle_ext = basename[BOTTLE_EXTNAME_RX, 1]
     return bottle_ext if bottle_ext
 
-    archive_ext = basename[/(\.(tar|cpio|pax)\.(gz|bz2|lz|xz|zst|Z))\Z/, 1]
+    archive_ext = basename[/(\.(tar|cpio|pax)\.(gz|bz2|lz|xz|Z))\Z/, 1]
     return archive_ext if archive_ext
 
     # Don't treat version numbers as extname.
@@ -251,18 +229,15 @@ class Pathname
     File.extname(basename)
   end
 
-  # For filetypes we support, returns basename without extension.
-  #
-  # @api public
-  sig { returns(String) }
+  # For filetypes we support, basename without extension
   def stem
-    File.basename(self, extname)
+    File.basename((path = to_s), extname(path))
   end
 
   # I don't trust the children.length == 0 check particularly, not to mention
   # it is slow to enumerate the whole directory just to see if it is empty,
   # instead rely on good ol' libc and the filesystem
-  sig { returns(T::Boolean) }
+  # @private
   def rmdir_if_possible
     rmdir
     true
@@ -273,63 +248,49 @@ class Pathname
     else
       false
     end
-  rescue Errno::EACCES, Errno::ENOENT, Errno::EBUSY, Errno::EPERM
+  rescue Errno::EACCES, Errno::ENOENT, Errno::EBUSY
     false
   end
 
-  sig { returns(Version) }
+  # @private
   def version
     require "version"
     Version.parse(basename)
   end
 
-  sig { returns(T::Boolean) }
+  # @private
   def text_executable?
-    /\A#!\s*\S+/.match?(open("r") { |f| f.read(1024) })
+    /^#!\s*\S+/ =~ open("r") { |f| f.read(1024) }
   end
 
-  sig { returns(String) }
   def sha256
     require "digest/sha2"
     Digest::SHA256.file(self).hexdigest
   end
 
-  sig { params(expected: T.nilable(Checksum)).void }
   def verify_checksum(expected)
-    raise ChecksumMissingError if expected.blank?
+    raise ChecksumMissingError if expected.nil? || expected.empty?
 
-    actual = Checksum.new(sha256.downcase)
-    raise ChecksumMismatchError.new(self, expected, actual) if expected != actual
+    actual = Checksum.new(expected.hash_type, send(expected.hash_type).downcase)
+    raise ChecksumMismatchError.new(self, expected, actual) unless expected == actual
   end
 
   alias to_str to_s
 
-  # Change to this directory, optionally executing the given block.
-  #
-  # @api public
-  sig {
-    type_parameters(:U).params(
-      _block: T.proc.params(path: Pathname).returns(T.type_parameter(:U)),
-    ).returns(T.type_parameter(:U))
-  }
-  def cd(&_block)
+  def cd
     Dir.chdir(self) { yield self }
   end
 
-  # Get all sub-directories of this directory.
-  #
-  # @api public
-  sig { returns(T::Array[Pathname]) }
   def subdirs
     children.select(&:directory?)
   end
 
-  sig { returns(Pathname) }
+  # @private
   def resolved_path
     symlink? ? dirname.join(readlink) : self
   end
 
-  sig { returns(T::Boolean) }
+  # @private
   def resolved_path_exists?
     link = readlink
   rescue ArgumentError
@@ -339,14 +300,16 @@ class Pathname
     dirname.join(link).exist?
   end
 
+  # @private
   def make_relative_symlink(src)
     dirname.mkpath
     File.symlink(src.relative_path_from(dirname), self)
   end
 
+  # @private
   def ensure_writable
     saved_perms = nil
-    unless writable?
+    unless writable_real?
       saved_perms = stat.mode
       FileUtils.chmod "u+rw", to_path
     end
@@ -355,28 +318,21 @@ class Pathname
     chmod saved_perms if saved_perms
   end
 
-  def which_install_info
-    @which_install_info ||=
-      if File.executable?("/usr/bin/install-info")
-        "/usr/bin/install-info"
-      elsif Formula["texinfo"].any_version_installed?
-        Formula["texinfo"].opt_bin/"install-info"
-      end
-  end
-
+  # @private
   def install_info
-    quiet_system(which_install_info, "--quiet", to_s, "#{dirname}/dir")
+    quiet_system "/usr/bin/install-info", "--quiet", to_s, "#{dirname}/dir"
   end
 
+  # @private
   def uninstall_info
-    quiet_system(which_install_info, "--delete", "--quiet", to_s, "#{dirname}/dir")
+    quiet_system "/usr/bin/install-info", "--delete", "--quiet", to_s, "#{dirname}/dir"
   end
 
-  # Writes an exec script in this folder for each target pathname.
+  # Writes an exec script in this folder for each target pathname
   def write_exec_script(*targets)
     targets.flatten!
     if targets.empty?
-      opoo "Tried to write exec scripts to #{self} for an empty list of targets"
+      opoo "tried to write exec scripts to #{self} for an empty list of targets"
       return
     end
     mkpath
@@ -389,7 +345,7 @@ class Pathname
     end
   end
 
-  # Writes an exec script that sets environment variables.
+  # Writes an exec script that sets environment variables
   def write_env_script(target, args, env = nil)
     unless env
       env = args
@@ -404,7 +360,7 @@ class Pathname
     SH
   end
 
-  # Writes a wrapper env script and moves all files to the dst.
+  # Writes a wrapper env script and moves all files to the dst
   def env_script_all_files(dst, env)
     dst.mkpath
     Pathname.glob("#{self}/*") do |file|
@@ -416,30 +372,15 @@ class Pathname
     end
   end
 
-  # Writes an exec script that invokes a Java jar.
-  sig {
-    params(
-      target_jar:   T.any(String, Pathname),
-      script_name:  T.any(String, Pathname),
-      java_opts:    String,
-      java_version: T.nilable(String),
-    ).returns(Integer)
-  }
+  # Writes an exec script that invokes a Java jar
   def write_jar_script(target_jar, script_name, java_opts = "", java_version: nil)
-    mkpath
-    (self/script_name).write <<~EOS
-      #!/bin/bash
-      export JAVA_HOME="#{Language::Java.overridable_java_home_env(java_version)[:JAVA_HOME]}"
-      exec "${JAVA_HOME}/bin/java" #{java_opts} -jar "#{target_jar}" "$@"
-    EOS
+    (self/script_name).write_env_script "java", "#{java_opts} -jar \"#{target_jar}\"",
+                                        Language::Java.overridable_java_home_env(java_version)
   end
 
   def install_metafiles(from = Pathname.pwd)
-    require "metafiles"
-
     Pathname(from).children.each do |p|
       next if p.directory?
-      next if File.empty?(p)
       next unless Metafiles.copy?(p.basename.to_s)
 
       # Some software symlinks these files (see help2man.rb)
@@ -453,114 +394,48 @@ class Pathname
     end
   end
 
-  sig { returns(T::Boolean) }
   def ds_store?
     basename.to_s == ".DS_Store"
   end
 
-  sig { returns(T::Boolean) }
   def binary_executable?
     false
   end
 
-  sig { returns(T::Boolean) }
   def mach_o_bundle?
     false
   end
 
-  sig { returns(T::Boolean) }
   def dylib?
     false
   end
-
-  sig { params(_wanted_arch: Symbol).returns(T::Boolean) }
-  def arch_compatible?(_wanted_arch)
-    true
-  end
-
-  sig { returns(T::Array[String]) }
-  def rpaths
-    []
-  end
-
-  sig { returns(String) }
-  def magic_number
-    @magic_number ||= if directory?
-      ""
-    else
-      # Length of the longest regex (currently Tar).
-      max_magic_number_length = 262
-      binread(max_magic_number_length) || ""
-    end
-  end
-
-  sig { returns(String) }
-  def file_type
-    @file_type ||= system_command("file", args: ["-b", self], print_stderr: false)
-                   .stdout.chomp
-  end
-
-  sig { returns(T::Array[String]) }
-  def zipinfo
-    @zipinfo ||= system_command("zipinfo", args: ["-1", self], print_stderr: false)
-                 .stdout
-                 .encode(Encoding::UTF_8, invalid: :replace)
-                 .split("\n")
-  end
-
-  # Like regular `rmtree`, except it never ignores errors.
-  #
-  # This was the default behaviour in Ruby 3.1 and earlier.
-  #
-  # @api public
-  def rmtree(noop: nil, verbose: nil, secure: nil)
-    # Ideally we'd odeprecate this but probably can't given gems so let's
-    # create a RuboCop autocorrect instead soon.
-    # This is why monkeypatching is non-ideal (but right solution to get
-    # Ruby 3.3 over the line).
-    odeprecated "rmtree", "FileUtils#rm_r"
-    FileUtils.rm_r(@path, noop:, verbose:, secure:)
-    nil
-  end
 end
+
 require "extend/os/pathname"
 
-require "context"
-
+# @private
 module ObserverPathnameExtension
-  extend T::Helpers
-
-  requires_ancestor { Pathname }
-
   class << self
-    include Context
-
-    sig { returns(Integer) }
     attr_accessor :n, :d
 
-    sig { void }
     def reset_counts!
       @n = @d = 0
       @put_verbose_trimmed_warning = false
     end
 
-    sig { returns(Integer) }
     def total
       n + d
     end
 
-    sig { returns([Integer, Integer]) }
     def counts
       [n, d]
     end
 
     MAXIMUM_VERBOSE_OUTPUT = 100
-    private_constant :MAXIMUM_VERBOSE_OUTPUT
 
-    sig { returns(T::Boolean) }
     def verbose?
-      return super unless ENV["CI"]
-      return false unless super
+      return Homebrew.args.verbose? unless ENV["CI"]
+      return false unless Homebrew.args.verbose?
 
       if total < MAXIMUM_VERBOSE_OUTPUT
         true
@@ -574,40 +449,34 @@ module ObserverPathnameExtension
     end
   end
 
-  sig { void }
   def unlink
     super
     puts "rm #{self}" if ObserverPathnameExtension.verbose?
     ObserverPathnameExtension.n += 1
   end
 
-  sig { void }
   def mkpath
     super
     puts "mkdir -p #{self}" if ObserverPathnameExtension.verbose?
   end
 
-  sig { void }
   def rmdir
     super
     puts "rmdir #{self}" if ObserverPathnameExtension.verbose?
     ObserverPathnameExtension.d += 1
   end
 
-  sig { params(src: Pathname).void }
   def make_relative_symlink(src)
     super
     puts "ln -s #{src.relative_path_from(dirname)} #{basename}" if ObserverPathnameExtension.verbose?
     ObserverPathnameExtension.n += 1
   end
 
-  sig { void }
   def install_info
     super
     puts "info #{self}" if ObserverPathnameExtension.verbose?
   end
 
-  sig { void }
   def uninstall_info
     super
     puts "uninfo #{self}" if ObserverPathnameExtension.verbose?

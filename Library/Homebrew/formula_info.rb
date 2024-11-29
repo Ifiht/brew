@@ -1,9 +1,9 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
-# Formula information drawn from an external `brew info --json` call.
+# Formula info drawn from an external `brew info --json` call
+
 class FormulaInfo
-  # The whole info structure parsed from the JSON.
+  # The whole info structure parsed from the JSON
   attr_accessor :info
 
   def initialize(info)
@@ -14,11 +14,13 @@ class FormulaInfo
   # Returns nil if formula is absent or if there was an error reading it.
   def self.lookup(name)
     json = Utils.popen_read(
-      *HOMEBREW_RUBY_EXEC_ARGS,
+      RUBY_PATH,
+      "-W0",
+      "-I", $LOAD_PATH.join(File::PATH_SEPARATOR),
       HOMEBREW_LIBRARY_PATH/"brew.rb",
       "info",
       "--json=v1",
-      name,
+      name
     )
 
     return unless $CHILD_STATUS.success?
@@ -55,7 +57,7 @@ class FormulaInfo
 
   def version(spec_type)
     version_str = info["versions"][spec_type.to_s]
-    version_str && Version.new(version_str)
+    version_str && Version.create(version_str)
   end
 
   def pkg_version(spec_type = :stable)

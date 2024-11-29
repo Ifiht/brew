@@ -1,40 +1,29 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
-require "attrable"
+require "open3"
+require "ostruct"
 require "plist"
 require "shellwords"
-require "uri"
 
-require "context"
 require "extend/io"
-require "utils/timer"
+require "extend/hash_validator"
+using HashValidator
+require "extend/predicable"
 
-# Class for running sub-processes and capturing their output and exit status.
-#
-# @api internal
-class SystemCommand
-  # Helper functions for calling {SystemCommand.run}.
-  #
-  # @api internal
-  module Mixin
-    # Run a fallible system command.
-    #
-    # @api internal
-    def system_command(executable, **options)
-      SystemCommand.run(executable, **options)
-    end
-
-    # Run an infallible system command.
-    #
-    # @api internal
-    def system_command!(command, **options)
-      SystemCommand.run!(command, **options)
-    end
+module Kernel
+  def system_command(*args)
+    SystemCommand.run(*args)
   end
 
-  include Context
-  extend Attrable
+  def system_command!(*args)
+    SystemCommand.run!(*args)
+  end
+end
+
+class SystemCommand
+  extend Predicable
+
+  attr_reader :pid
 
   def self.run(executable, **options)
     new(executable, **options).run!
@@ -44,29 +33,18 @@ class SystemCommand
     run(command, **options, must_succeed: true)
   end
 
-  sig { returns(SystemCommand::Result) }
   def run!
-    $stderr.puts redact_secrets(command.shelljoin.gsub('\=', "="), @secrets) if verbose? || debug?
+    puts redact_secrets(command.shelljoin.gsub('\=', "="), @secrets) if verbose? || Homebrew.args.debug?
 
     @output = []
 
     each_output_line do |type, line|
       case type
       when :stdout
-        case @print_stdout
-        when true
-          $stdout << redact_secrets(line, @secrets)
-        when :debug
-          $stderr << redact_secrets(line, @secrets) if debug?
-        end
+        $stdout << line if print_stdout?
         @output << [:stdout, line]
       when :stderr
-        case @print_stderr
-        when true
-          $stderr << redact_secrets(line, @secrets)
-        when :debug
-          $stderr << redact_secrets(line, @secrets) if debug?
-        end
+        $stderr << line if print_stderr?
         @output << [:stderr, line]
       end
     end
@@ -76,150 +54,63 @@ class SystemCommand
     result
   end
 
-  sig {
-    params(
-      executable:   T.any(String, Pathname),
-      args:         T::Array[T.any(String, Integer, Float, URI::Generic)],
-      sudo:         T::Boolean,
-      sudo_as_root: T::Boolean,
-      env:          T::Hash[String, String],
-      input:        T.any(String, T::Array[String]),
-      must_succeed: T::Boolean,
-      print_stdout: T.any(T::Boolean, Symbol),
-      print_stderr: T.any(T::Boolean, Symbol),
-      debug:        T.nilable(T::Boolean),
-      verbose:      T.nilable(T::Boolean),
-      secrets:      T.any(String, T::Array[String]),
-      chdir:        T.any(String, Pathname),
-      reset_uid:    T::Boolean,
-      timeout:      T.nilable(T.any(Integer, Float)),
-    ).void
-  }
-  def initialize(
-    executable,
-    args: [],
-    sudo: false,
-    sudo_as_root: false,
-    env: {},
-    input: [],
-    must_succeed: false,
-    print_stdout: false,
-    print_stderr: true,
-    debug: nil,
-    verbose: false,
-    secrets: [],
-    chdir: T.unsafe(nil),
-    reset_uid: false,
-    timeout: nil
-  )
+  def initialize(executable, args: [], sudo: false, env: {}, input: [], must_succeed: false,
+                 print_stdout: false, print_stderr: true, verbose: false, secrets: [], **options)
+
     require "extend/ENV"
     @executable = executable
     @args = args
-
-    raise ArgumentError, "`sudo_as_root` cannot be set if sudo is false" if !sudo && sudo_as_root
-
-    if print_stdout.is_a?(Symbol) && print_stdout != :debug
-      raise ArgumentError, "`print_stdout` is not a valid symbol"
-    end
-    if print_stderr.is_a?(Symbol) && print_stderr != :debug
-      raise ArgumentError, "`print_stderr` is not a valid symbol"
-    end
-
     @sudo = sudo
-    @sudo_as_root = sudo_as_root
-    env.each_key do |name|
-      next if /^[\w&&\D]\w*$/.match?(name)
-
-      raise ArgumentError, "Invalid variable name: #{name}"
-    end
-    @env = env
-    @input = Array(input)
-    @must_succeed = must_succeed
+    @input = [*input]
     @print_stdout = print_stdout
     @print_stderr = print_stderr
-    @debug = debug
     @verbose = verbose
     @secrets = (Array(secrets) + ENV.sensitive_environment.values).uniq
-    @chdir = chdir
-    @reset_uid = reset_uid
-    @timeout = timeout
+    @must_succeed = must_succeed
+    options.assert_valid_keys!(:chdir)
+    @options = options
+    @env = env
+
+    @env.keys.grep_v(/^[\w&&\D]\w*$/) do |name|
+      raise ArgumentError, "Invalid variable name: '#{name}'"
+    end
   end
 
-  sig { returns(T::Array[String]) }
   def command
-    [*command_prefix, executable.to_s, *expanded_args]
+    [*sudo_prefix, *env_args, executable.to_s, *expanded_args]
   end
 
   private
 
-  attr_reader :executable, :args, :input, :chdir, :env
+  attr_reader :executable, :args, :input, :options, :env
 
-  attr_predicate :sudo?, :sudo_as_root?, :must_succeed?, :reset_uid?
+  attr_predicate :sudo?, :print_stdout?, :print_stderr?, :verbose?, :must_succeed?
 
-  sig { returns(T::Boolean) }
-  def debug?
-    return super if @debug.nil?
-
-    @debug
-  end
-
-  sig { returns(T::Boolean) }
-  def verbose?
-    return super if @verbose.nil?
-
-    @verbose
-  end
-
-  sig { returns(T::Array[String]) }
   def env_args
-    set_variables = env.compact.map do |name, value|
-      sanitized_name = Shellwords.escape(name)
-      sanitized_value = Shellwords.escape(value)
-      "#{sanitized_name}=#{sanitized_value}"
-    end
+    set_variables = env.reject { |_, value| value.nil? }
+                       .map do |name, value|
+                         sanitized_name = Shellwords.escape(name)
+                         sanitized_value = Shellwords.escape(value)
+                         "#{sanitized_name}=#{sanitized_value}"
+                       end
 
     return [] if set_variables.empty?
 
-    set_variables
+    ["/usr/bin/env", *set_variables]
   end
 
-  sig { returns(T.nilable(String)) }
-  def homebrew_sudo_user
-    ENV.fetch("HOMEBREW_SUDO_USER", nil)
-  end
-
-  sig { returns(T::Array[String]) }
   def sudo_prefix
+    return [] unless sudo?
+
     askpass_flags = ENV.key?("SUDO_ASKPASS") ? ["-A"] : []
-    user_flags = []
-    if Homebrew::EnvConfig.sudo_through_sudo_user?
-      raise ArgumentError, "HOMEBREW_SUDO_THROUGH_SUDO_USER set but SUDO_USER unset!" if homebrew_sudo_user.blank?
-
-      user_flags += ["--prompt", "Password for %p:", "-u", homebrew_sudo_user,
-                     *askpass_flags,
-                     "-E", *env_args,
-                     "--", "/usr/bin/sudo"]
-    end
-    user_flags += ["-u", "root"] if sudo_as_root?
-    ["/usr/bin/sudo", *user_flags, *askpass_flags, "-E", *env_args, "--"]
+    ["/usr/bin/sudo", *askpass_flags, "-E", "--"]
   end
 
-  sig { returns(T::Array[String]) }
-  def env_prefix
-    ["/usr/bin/env", *env_args]
-  end
-
-  sig { returns(T::Array[String]) }
-  def command_prefix
-    sudo? ? sudo_prefix : env_prefix
-  end
-
-  sig { returns(T::Array[String]) }
   def expanded_args
     @expanded_args ||= args.map do |arg|
       if arg.respond_to?(:to_path)
         File.absolute_path(arg)
-      elsif arg.is_a?(Integer) || arg.is_a?(Float) || arg.is_a?(URI::Generic)
+      elsif arg.is_a?(Integer) || arg.is_a?(Float) || arg.is_a?(URI)
         arg.to_s
       else
         arg.to_str
@@ -227,160 +118,50 @@ class SystemCommand
     end
   end
 
-  class ProcessTerminatedInterrupt < StandardError; end
-  private_constant :ProcessTerminatedInterrupt
-
-  sig { params(block: T.proc.params(type: Symbol, line: String).void).void }
-  def each_output_line(&block)
+  def each_output_line(&b)
     executable, *args = command
-    options = {
-      # Create a new process group so that we can send `SIGINT` from
-      # parent to child rather than the child receiving `SIGINT` directly.
-      pgroup: sudo? ? nil : true,
-    }
-    options[:chdir] = chdir if chdir
 
-    raw_stdin, raw_stdout, raw_stderr, raw_wait_thr = exec3(env, executable, *args, **options)
+    raw_stdin, raw_stdout, raw_stderr, raw_wait_thr =
+      Open3.popen3(env, [executable, executable], *args, **options)
+    @pid = raw_wait_thr.pid
 
     write_input_to(raw_stdin)
     raw_stdin.close_write
-
-    thread_context = Context.current
-    thread_ready_queue = Queue.new
-    thread_done_queue = Queue.new
-    line_thread = Thread.new do
-      # Ensure the new thread inherits the current context.
-      Context.current = thread_context
-
-      Thread.handle_interrupt(ProcessTerminatedInterrupt => :never) do
-        thread_ready_queue << true
-        each_line_from [raw_stdout, raw_stderr], &block
-      end
-      thread_done_queue.pop
-    rescue ProcessTerminatedInterrupt
-      nil
-    end
-
-    end_time = Time.now + @timeout if @timeout
-    raise Timeout::Error if raw_wait_thr.join(Utils::Timer.remaining(end_time)).nil?
+    each_line_from [raw_stdout, raw_stderr], &b
 
     @status = raw_wait_thr.value
-  rescue Interrupt
-    Process.kill("INT", raw_wait_thr.pid) if raw_wait_thr && !sudo?
-    raise Interrupt
-  ensure
-    if line_thread
-      thread_ready_queue.pop
-      line_thread.raise ProcessTerminatedInterrupt.new
-      thread_done_queue << true
-      line_thread.join
-    end
-    raw_stdin&.close
-    raw_stdout&.close
-    raw_stderr&.close
+  rescue SystemCallError => e
+    @status = $CHILD_STATUS
+    @output << [:stderr, e.message]
   end
 
-  sig {
-    params(
-      env:        T::Hash[String, String],
-      executable: String,
-      args:       String,
-      options:    T.untyped,
-    ).returns([IO, IO, IO, Thread])
-  }
-  def exec3(env, executable, *args, **options)
-    in_r, in_w = IO.pipe
-    options[:in] = in_r
-    in_w.sync = true
-
-    out_r, out_w = IO.pipe
-    options[:out] = out_w
-
-    err_r, err_w = IO.pipe
-    options[:err] = err_w
-
-    pid = fork do
-      Process::UID.change_privilege(Process.euid) if reset_uid? && Process.euid != Process.uid
-
-      exec(
-        env.merge({ "COLUMNS" => Tty.width.to_s }),
-        [executable, executable],
-        *args,
-        **options,
-      )
-    rescue SystemCallError => e
-      $stderr.puts(e.message)
-      exit!(127)
-    end
-    wait_thr = Process.detach(pid)
-
-    [in_w, out_r, err_r, wait_thr]
-  rescue
-    in_w&.close
-    out_r&.close
-    err_r&.close
-    raise
-  ensure
-    in_r&.close
-    out_w&.close
-    err_w&.close
-  end
-
-  sig { params(raw_stdin: IO).void }
   def write_input_to(raw_stdin)
-    input.each { raw_stdin.write(_1) }
+    input.each(&raw_stdin.method(:write))
   end
 
-  sig { params(sources: T::Array[IO], _block: T.proc.params(type: Symbol, line: String).void).void }
-  def each_line_from(sources, &_block)
-    sources = {
-      sources[0] => :stdout,
-      sources[1] => :stderr,
-    }
+  def each_line_from(sources)
+    loop do
+      readable_sources, = IO.select(sources)
 
-    pending_interrupt = T.let(false, T::Boolean)
+      readable_sources = readable_sources.reject(&:eof?)
 
-    until pending_interrupt || sources.empty?
-      readable_sources = T.let([], T::Array[IO])
-      begin
-        Thread.handle_interrupt(ProcessTerminatedInterrupt => :on_blocking) do
-          readable_sources = T.must(IO.select(sources.keys)).fetch(0)
-        end
-      rescue ProcessTerminatedInterrupt
-        readable_sources = sources.keys
-        pending_interrupt = true
-      end
+      break if readable_sources.empty?
 
       readable_sources.each do |source|
-        loop do
-          line = source.readline_nonblock || ""
-          yield(sources.fetch(source), line)
-        end
-      rescue EOFError
-        source.close_read
-        sources.delete(source)
-      rescue IO::WaitReadable
-        # We've got all the data that was ready, but the other end of the stream isn't finished yet
+        line = source.readline_nonblock || ""
+        type = (source == sources[0]) ? :stdout : :stderr
+        yield(type, line)
+      rescue IO::WaitReadable, EOFError
+        next
       end
     end
 
-    sources.each_key(&:close_read)
+    sources.each(&:close_read)
   end
 
-  # Result containing the output and exit status of a finished sub-process.
   class Result
-    include Context
-
     attr_accessor :command, :status, :exit_status
 
-    sig {
-      params(
-        command: T::Array[String],
-        output:  T::Array[[Symbol, String]],
-        status:  Process::Status,
-        secrets: T::Array[String],
-      ).void
-    }
     def initialize(command, output, status, secrets:)
       @command       = command
       @output        = output
@@ -389,67 +170,59 @@ class SystemCommand
       @secrets       = secrets
     end
 
-    sig { void }
     def assert_success!
       return if @status.success?
 
       raise ErrorDuringExecution.new(command, status: @status, output: @output, secrets: @secrets)
     end
 
-    sig { returns(String) }
     def stdout
       @stdout ||= @output.select { |type,| type == :stdout }
                          .map { |_, line| line }
                          .join
     end
 
-    sig { returns(String) }
     def stderr
       @stderr ||= @output.select { |type,| type == :stderr }
                          .map { |_, line| line }
                          .join
     end
 
-    sig { returns(String) }
     def merged_output
       @merged_output ||= @output.map { |_, line| line }
                                 .join
     end
 
-    sig { returns(T::Boolean) }
     def success?
       return false if @exit_status.nil?
 
       @exit_status.zero?
     end
 
-    sig { returns([String, String, Process::Status]) }
     def to_ary
       [stdout, stderr, status]
     end
 
-    sig { returns(T.nilable(T.any(Array, Hash))) }
     def plist
       @plist ||= begin
         output = stdout
 
-        output = output.sub(/\A(.*?)(\s*<\?\s*xml)/m) do
-          warn_plist_garbage(T.must(Regexp.last_match(1)))
-          Regexp.last_match(2)
+        if /\A(?<garbage>.*?)<\?\s*xml/m =~ output
+          output = output.sub(/\A#{Regexp.escape(garbage)}/m, "")
+          warn_plist_garbage(garbage)
         end
 
-        output = output.sub(%r{(<\s*/\s*plist\s*>\s*)(.*?)\Z}m) do
-          warn_plist_garbage(T.must(Regexp.last_match(2)))
-          Regexp.last_match(1)
+        if %r{<\s*/\s*plist\s*>(?<garbage>.*?)\Z}m =~ output
+          output = output.sub(/#{Regexp.escape(garbage)}\Z/, "")
+          warn_plist_garbage(garbage)
         end
 
-        Plist.parse_xml(output, marshal: false)
+        Plist.parse_xml(output)
       end
     end
 
-    sig { params(garbage: String).void }
     def warn_plist_garbage(garbage)
-      return unless verbose?
+      return unless Homebrew.args.verbose?
       return unless garbage.match?(/\S/)
 
       opoo "Received non-XML output from #{Formatter.identifier(command.first)}:"

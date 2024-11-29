@@ -1,4 +1,3 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
 module RuboCop
@@ -13,6 +12,10 @@ module RuboCop
 
         attr_reader :method_node
 
+        def dsl_version?
+          hash_node
+        end
+
         def header_str
           @header_str ||= source_range.source
         end
@@ -21,13 +24,12 @@ module RuboCop
           @source_range ||= method_node.loc.expression
         end
 
-        sig { returns(String) }
         def preferred_header_str
           "cask '#{cask_token}'"
         end
 
         def cask_token
-          @cask_token ||= method_node.first_argument.str_content
+          @cask_token ||= pair_node.val_node.children.first
         end
 
         def hash_node

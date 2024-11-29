@@ -1,10 +1,8 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
 require "delegate"
 
-# A collection of dependencies.
-class Dependencies < SimpleDelegator
+class Dependencies < DelegateClass(Array)
   def initialize(*args)
     super(args)
   end
@@ -12,62 +10,118 @@ class Dependencies < SimpleDelegator
   alias eql? ==
 
   def optional
-    __getobj__.select(&:optional?)
+    select(&:optional?)
   end
 
   def recommended
-    __getobj__.select(&:recommended?)
+    select(&:recommended?)
   end
 
   def build
-    __getobj__.select(&:build?)
+    select(&:build?)
   end
 
   def required
-    __getobj__.select(&:required?)
+    select(&:required?)
   end
 
   def default
     build + required + recommended
   end
 
-  def dup_without_system_deps
-    self.class.new(*__getobj__.reject { |dep| dep.uses_from_macos? && dep.use_macos_install? })
-  end
-
-  sig { returns(String) }
   def inspect
-    "#<#{self.class.name}: #{__getobj__}>"
-  end
-
-  sig { returns(T::Array[Dependency]) }
-  def to_a
-    __getobj__.to_a
+    "#<#{self.class.name}: #{to_a}>"
   end
 end
 
-# A collection of requirements.
-class Requirements < SimpleDelegator
+class Requirements < DelegateClass(Set)
   def initialize(*args)
     super(Set.new(args))
   end
 
   def <<(other)
-    if other.is_a?(Object) && other.is_a?(Comparable)
-      __getobj__.grep(other.class) do |req|
+    if other.is_a?(Comparable)
+      grep(other.class) do |req|
         return self if req > other
 
-        __getobj__.delete(req)
+        delete(req)
       end
     end
-    # see https://sorbet.org/docs/faq#how-can-i-fix-type-errors-that-arise-from-super
-    T.bind(self, T.untyped)
     super
     self
   end
 
-  sig { returns(String) }
   def inspect
-    "#<#{self.class.name}: {#{__getobj__.to_a.join(", ")}}>"
+    "#<#{self.class.name}: {#{to_a.join(", ")}}>"
+  end
+end
+
+module Homebrew
+  module_function
+
+  def argv_includes_ignores(argv)
+    includes = []
+    ignores = []
+
+    if argv.include? "--include-build"
+      includes << "build?"
+    else
+      ignores << "build?"
+    end
+
+    if argv.include? "--include-test"
+      includes << "test?"
+    else
+      ignores << "test?"
+    end
+
+    if argv.include? "--include-optional"
+      includes << "optional?"
+    else
+      ignores << "optional?"
+    end
+
+    ignores << "recommended?" if Homebrew.args.skip_recommended?
+
+    [includes, ignores]
+  end
+
+  def recursive_includes(klass, formula, includes, ignores)
+    type = if klass == Dependency
+      :dependencies
+    elsif klass == Requirement
+      :requirements
+    else
+      raise ArgumentError, "Invalid class argument: #{klass}"
+    end
+
+    formula.send("recursive_#{type}") do |dependent, dep|
+      if dep.recommended?
+        klass.prune if ignores.include?("recommended?") || dependent.build.without?(dep)
+      elsif dep.optional?
+        klass.prune if !includes.include?("optional?") && !dependent.build.with?(dep)
+      elsif dep.build? || dep.test?
+        keep = false
+        keep ||= dep.test? && includes.include?("test?") && dependent == formula
+        keep ||= dep.build? && includes.include?("build?")
+        klass.prune unless keep
+      end
+
+      # If a tap isn't installed, we can't find the dependencies of one of
+      # its formulae, and an exception will be thrown if we try.
+      if type == :dependencies &&
+         dep.is_a?(TapDependency) &&
+         !dep.tap.installed?
+        Dependency.keep_but_prune_recursive_deps
+      end
+    end
+  end
+
+  def reject_ignores(dependables, ignores, includes)
+    dependables.reject do |dep|
+      next false unless ignores.any? { |ignore| dep.send(ignore) }
+
+      includes.none? { |include| dep.send(include) }
+    end
   end
 end

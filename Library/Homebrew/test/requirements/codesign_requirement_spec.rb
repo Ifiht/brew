@@ -2,16 +2,16 @@
 
 require "requirements/codesign_requirement"
 
-RSpec.describe CodesignRequirement do
-  subject(:requirement) do
-    described_class.new([{ identity:, with:, url: }])
-  end
+describe CodesignRequirement do
+  subject(:requirement) {
+    described_class.new([{ identity: identity, with: with, url: url }])
+  }
 
   let(:identity) { "lldb_codesign" }
   let(:with) { "LLDB" }
-  let(:url) do
+  let(:url) {
     "https://llvm.org/svn/llvm-project/lldb/trunk/docs/code-signing.txt"
-  end
+  }
 
   describe "#message" do
     it "includes all parameters" do

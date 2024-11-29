@@ -1,14 +1,15 @@
 # frozen_string_literal: true
 
-require "cmd/link"
 require "cmd/shared_examples/args_parse"
 
-RSpec.describe Homebrew::Cmd::Link do
+describe "Homebrew.link_args" do
   it_behaves_like "parseable arguments"
+end
 
-  it "links a given Formula", :integration_test do
+describe "brew link", :integration_test do
+  it "links a given Formula" do
     install_test_formula "testball"
-    Formula["testball"].any_installed_keg.unlink
+    Formula["testball"].opt_or_installed_prefix_keg.unlink
 
     expect { brew "link", "testball" }
       .to output(/Linking/).to_stdout

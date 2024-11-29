@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
-require "cask/denylist"
-
-RSpec.describe Cask::Denylist, :cask do
+describe Cask::Denylist, :cask do
   describe "::reason" do
     matcher :disallow do |name|
       match do |expected|
@@ -16,6 +14,7 @@ RSpec.describe Cask::Denylist, :cask do
     it { is_expected.to disallow("adobe-indesign") }
     it { is_expected.to disallow("adobe-photoshop") }
     it { is_expected.to disallow("adobe-premiere") }
+    it { is_expected.to disallow("audacity") }
     it { is_expected.to disallow("pharo") }
     it { is_expected.not_to disallow("allowed-cask") }
   end

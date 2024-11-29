@@ -2,11 +2,11 @@
 
 require_relative "shared_examples/uninstall_zap"
 
-RSpec.describe Cask::Artifact::Zap, :cask do
+describe Cask::Artifact::Zap, :cask do
   describe "#zap_phase" do
     include_examples "#uninstall_phase or #zap_phase"
 
-    context "when using :rmdir" do
+    context "using :rmdir" do
       subject(:artifact) { cask.artifacts.find { |a| a.is_a?(described_class) } }
 
       let(:fake_system_command) { NeverSudoSystemCommand }

@@ -1,20 +1,20 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
 require "cask/artifact/abstract_artifact"
-require "extend/hash/keys"
+
+require "extend/hash_validator"
+using HashValidator
 
 module Cask
   module Artifact
-    # Superclass for all artifacts which have a source and a target location.
     class Relocated < AbstractArtifact
       def self.from_args(cask, *args)
         source_string, target_hash = args
 
         if target_hash
-          raise CaskInvalidError, cask unless target_hash.respond_to?(:keys)
+          raise CaskInvalidError unless target_hash.respond_to?(:keys)
 
-          target_hash.assert_valid_keys(:target)
+          target_hash.assert_valid_keys!(:target)
         end
 
         target_hash ||= {}
@@ -22,39 +22,21 @@ module Cask
         new(cask, source_string, **target_hash)
       end
 
-      def resolve_target(target, base_dir: config.public_send(self.class.dirmethod))
-        target = Pathname(target)
-
-        if target.relative?
-          return target.expand_path if target.descend.first.to_s == "~"
-          return base_dir/target if base_dir
-        end
-
-        target
+      def resolve_target(target)
+        config.public_send(self.class.dirmethod).join(target)
       end
 
-      sig {
-        params(cask: Cask, source: T.nilable(T.any(String, Pathname)), target_hash: T.any(String, Pathname))
-          .void
-      }
-      def initialize(cask, source, **target_hash)
-        super
+      attr_reader :source, :target
 
-        target = target_hash[:target]
+      def initialize(cask, source, target: nil)
+        super(cask)
+
         @source_string = source.to_s
         @target_string = target.to_s
-      end
-
-      def source
-        @source ||= begin
-          base_path = cask.staged_path
-          base_path = base_path.join(cask.url.only_path) if cask.url&.only_path.present?
-          base_path.join(@source_string)
-        end
-      end
-
-      def target
-        @target ||= resolve_target(@target_string.presence || source.basename)
+        source = cask.staged_path.join(source)
+        @source = source
+        target ||= source.basename
+        @target = resolve_target(target)
       end
 
       def to_a
@@ -63,7 +45,6 @@ module Cask
         end
       end
 
-      sig { override.returns(String) }
       def summarize
         target_string = @target_string.empty? ? "" : " -> #{@target_string}"
         "#{@source_string}#{target_string}"
@@ -83,7 +64,7 @@ module Cask
         altnames = command.run("/usr/bin/xattr",
                                args:         ["-p", ALT_NAME_ATTRIBUTE, file],
                                print_stderr: false).stdout.sub(/\A\((.*)\)\Z/, '\1')
-        odebug "Existing metadata is: #{altnames}"
+        odebug "Existing metadata is: '#{altnames}'"
         altnames.concat(", ") unless altnames.empty?
         altnames.concat(%Q("#{altname}"))
         altnames = "(#{altnames})"
@@ -97,7 +78,7 @@ module Cask
       end
 
       def printable_target
-        target.to_s.sub(/^#{Dir.home}(#{File::SEPARATOR}|$)/, "~/")
+        target.to_s.sub(/^#{ENV['HOME']}(#{File::SEPARATOR}|$)/, "~/")
       end
     end
   end

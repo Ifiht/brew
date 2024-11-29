@@ -1,25 +1,19 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
-require "rubocops/extend/formula_cop"
+require "rubocops/extend/formula"
 
 module RuboCop
   module Cop
     module FormulaAudit
-      # This cop checks for correct order of `depends_on` in formulae.
+      # This cop checks for correct order of `depends_on` in Formulae.
       #
       # precedence order:
-      # build-time > test > normal > recommended > optional
+      # build-time > run-time > normal > recommended > optional
       class DependencyOrder < FormulaCop
-        extend AutoCorrector
-
-        sig { override.params(formula_nodes: FormulaNodes).void }
-        def audit_formula(formula_nodes)
-          body_node = formula_nodes.body_node
-
+        def audit_formula(_node, _class_node, _parent_class_node, body_node)
           check_dependency_nodes_order(body_node)
           check_uses_from_macos_nodes_order(body_node)
-          ([:head, :stable] + on_system_methods).each do |block_name|
+          [:devel, :head, :stable].each do |block_name|
             block = find_block(body_node, block_name)
             next unless block
 
@@ -66,19 +60,17 @@ module RuboCop
         end
 
         # `depends_on :apple if build.with? "foo"` should always be defined
-        #  after `depends_on :foo`.
-        # This method reorders the dependencies array according to the above rule.
-        sig { params(ordered: T::Array[RuboCop::AST::Node]).returns(T::Array[RuboCop::AST::Node]) }
+        #  after `depends_on :foo`
+        # This method reorders dependencies array according to above rule
         def sort_conditional_dependencies!(ordered)
           length = ordered.size
           idx = 0
           while idx < length
-            idx1 = T.let(nil, T.nilable(Integer))
-            idx2 = T.let(nil, T.nilable(Integer))
+            idx1, idx2 = nil
             ordered.each_with_index do |dep, pos|
               idx = pos+1
               match_nodes = build_with_dependency_name(dep)
-              next if match_nodes.blank?
+              next if !match_nodes || match_nodes.empty?
 
               idx1 = pos
               ordered.drop(idx1+1).each_with_index do |dep2, pos2|
@@ -88,39 +80,30 @@ module RuboCop
               end
               break if idx2
             end
-            insert_after!(ordered, idx1, idx2 + T.must(idx1)) if idx2
+            insert_after!(ordered, idx1, idx2+idx1) if idx2
           end
           ordered
         end
 
-        # Verify actual order of sorted `depends_on` nodes in source code;
-        # raise RuboCop problem otherwise.
+        # Verify actual order of sorted `depends_on` nodes in source code
+        # Else raise RuboCop problem
         def verify_order_in_source(ordered)
-          ordered.each_with_index do |node_1, idx|
-            l1 = line_number(node_1)
-            l2 = T.let(nil, T.nilable(Integer))
-            node_2 = T.let(nil, T.nilable(RuboCop::AST::Node))
-            ordered.drop(idx + 1).each do |test_node|
-              l2 = line_number(test_node)
-              node_2 = test_node if l2 < l1
+          ordered.each_with_index do |dependency_node_1, idx|
+            l1 = line_number(dependency_node_1)
+            dependency_node_2 = nil
+            ordered.drop(idx+1).each do |node2|
+              l2 = line_number(node2)
+              dependency_node_2 = node2 if l2 < l1
             end
-            next unless node_2
+            next unless dependency_node_2
 
-            offending_node(node_1)
-
-            problem "dependency \"#{dependency_name(node_1)}\" (line #{l1}) should be put before dependency " \
-                    "\"#{dependency_name(node_2)}\" (line #{l2})" do |corrector|
-              indentation = " " * (start_column(node_2) - line_start_column(node_2))
-              line_breaks = "\n"
-              corrector.insert_before(node_2.source_range,
-                                      node_1.source + line_breaks + indentation)
-              corrector.remove(range_with_surrounding_space(range: node_1.source_range, side: :left))
-            end
+            @offensive_nodes = [dependency_node_1, dependency_node_2]
+            component_problem dependency_node_1, dependency_node_2
           end
         end
 
         # Node pattern method to match
-        # `depends_on` variants.
+        # `depends_on` variants
         def_node_matcher :depends_on_node?, <<~EOS
           {(if _ (send nil? :depends_on ...) nil?)
            (send nil? :depends_on ...)}
@@ -158,13 +141,38 @@ module RuboCop
 
         def build_with_dependency_name(node)
           match_nodes = build_with_dependency_node(node)
-          match_nodes = match_nodes.to_a.compact
+          match_nodes = match_nodes.to_a.delete_if(&:nil?)
           match_nodes.map { |n| string_content(n) } unless match_nodes.empty?
         end
 
         def dependency_name(dependency_node)
           match_node = dependency_name_node(dependency_node).to_a.first
           string_content(match_node) if match_node
+        end
+
+        def autocorrect(_node)
+          succeeding_node = @offensive_nodes[0]
+          preceding_node = @offensive_nodes[1]
+          lambda do |corrector|
+            reorder_components(corrector, succeeding_node, preceding_node)
+          end
+        end
+
+        private
+
+        def component_problem(c1, c2)
+          offending_node(c1)
+          problem "dependency \"#{dependency_name(c1)}\" " \
+                  "(line #{line_number(c1)}) should be put before dependency "\
+                  "\"#{dependency_name(c2)}\" (line #{line_number(c2)})"
+        end
+
+        # Reorder two nodes in the source, using the corrector instance in autocorrect method
+        def reorder_components(corrector, node1, node2)
+          indentation = " " * (start_column(node2) - line_start_column(node2))
+          line_breaks = "\n"
+          corrector.insert_before(node2.source_range, node1.source + line_breaks + indentation)
+          corrector.remove(range_with_surrounding_space(range: node1.source_range, side: :left))
         end
       end
     end

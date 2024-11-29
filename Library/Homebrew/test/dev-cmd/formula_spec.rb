@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
 require "cmd/shared_examples/args_parse"
-require "dev-cmd/formula"
 
-RSpec.describe Homebrew::DevCmd::FormulaCmd do
+describe "Homebrew.formula_args" do
   it_behaves_like "parseable arguments"
+end
 
-  it "prints a given Formula's path", :integration_test do
+describe "brew formula", :integration_test do
+  it "prints a given Formula's path" do
     formula_file = setup_test_formula "testball"
 
     expect { brew "formula", "testball" }

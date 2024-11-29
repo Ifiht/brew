@@ -2,7 +2,7 @@
 
 require_relative "shared_examples"
 
-RSpec.describe UnpackStrategy::Subversion, :needs_svn do
+describe UnpackStrategy::Subversion, :needs_svn do
   let(:repo) { mktmpdir }
   let(:working_copy) { mktmpdir }
   let(:path) { working_copy }

@@ -1,44 +1,46 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
-
-require "compilers"
 
 class Keg
   def relocate_dynamic_linkage(relocation)
     # Patching the dynamic linker of glibc breaks it.
-    return if name.match? Version.formula_optionally_versioned_regex(:glibc)
+    return if name == "glibc"
 
-    old_prefix, new_prefix = relocation.replacement_pair_for(:prefix)
+    # Patching patchelf using itself fails with "Text file busy" or SIGBUS.
+    return if name == "patchelf"
 
     elf_files.each do |file|
       file.ensure_writable do
-        change_rpath(file, old_prefix, new_prefix)
+        change_rpath(file, relocation.old_prefix, relocation.new_prefix)
       end
     end
   end
 
   def change_rpath(file, old_prefix, new_prefix)
-    return false if !file.elf? || !file.dynamic_elf?
+    return if !file.elf? || !file.dynamic_elf?
 
-    updated = {}
-    old_rpath = file.rpath
-    new_rpath = if old_rpath
-      rpath = old_rpath.split(":")
-                       .map { |x| x.sub(old_prefix, new_prefix) }
-                       .select { |x| x.start_with?(new_prefix, "$ORIGIN") }
+    patchelf = DevelopmentTools.locate "patchelf"
+    odie "Could not locate patchelf, please: brew install patchelf." if patchelf.nil?
 
-      lib_path = "#{new_prefix}/lib"
-      rpath << lib_path unless rpath.include? lib_path
+    cmd_rpath = [patchelf, "--print-rpath", file]
+    old_rpath = Utils.popen_read(*cmd_rpath, err: :out).strip
 
-      # Add GCC's lib directory (as of GCC 12+) to RPATH when there is existing versioned linkage.
-      # This prevents broken linkage when pouring bottles built with an old GCC formula.
-      unless name.match?(Version.formula_optionally_versioned_regex(:gcc))
-        rpath.map! { |rp| rp.sub(%r{lib/gcc/\d+$}, "lib/gcc/current") }
-      end
+    # patchelf requires that the ELF file have a .dynstr section.
+    # Skip ELF files that do not have a .dynstr section.
+    return if ["cannot find section .dynstr", "strange: no string table"].include?(old_rpath)
 
-      rpath.join(":")
+    unless $CHILD_STATUS.success?
+      raise ErrorDuringExecution.new(cmd_rpath, status: $CHILD_STATUS, output: [[:stderr, old_rpath]])
     end
-    updated[:rpath] = new_rpath if old_rpath != new_rpath
+
+    rpath = old_rpath
+            .split(":")
+            .map { |x| x.sub(old_prefix, new_prefix) }
+            .select { |x| x.start_with?(new_prefix, "$ORIGIN") }
+
+    lib_path = "#{new_prefix}/lib"
+    rpath << lib_path unless rpath.include? lib_path
+    new_rpath = rpath.join(":")
+    cmd = [patchelf, "--force-rpath", "--set-rpath", new_rpath]
 
     old_interpreter = file.interpreter
     new_interpreter = if old_interpreter.nil?
@@ -48,10 +50,11 @@ class Keg
     else
       old_interpreter.sub old_prefix, new_prefix
     end
-    updated[:interpreter] = new_interpreter if old_interpreter != new_interpreter
+    cmd << "--set-interpreter" << new_interpreter if old_interpreter != new_interpreter
 
-    file.patch!(interpreter: updated[:interpreter], rpath: updated[:rpath])
-    true
+    return if old_rpath == new_rpath && old_interpreter == new_interpreter
+
+    safe_system(*cmd, file)
   end
 
   def detect_cxx_stdlibs(options = {})
@@ -83,5 +86,22 @@ class Keg
       elf_files << pn
     end
     elf_files
+  end
+
+  def self.relocation_formulae
+    ["patchelf"]
+  end
+
+  def self.bottle_dependencies
+    @bottle_dependencies ||= begin
+      formulae = relocation_formulae
+      gcc = Formula["gcc"]
+      if !Homebrew::EnvConfig.force_homebrew_on_linux? &&
+         DevelopmentTools.non_apple_gcc_version("gcc") < gcc.version.to_i
+        formulae += gcc.recursive_dependencies.map(&:name)
+        formulae << gcc.name
+      end
+      formulae
+    end
   end
 end

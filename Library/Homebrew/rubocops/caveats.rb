@@ -1,39 +1,16 @@
-# typed: strict
 # frozen_string_literal: true
 
-require "rubocops/extend/formula_cop"
+require "rubocops/extend/formula"
 
 module RuboCop
   module Cop
     module FormulaAudit
-      # This cop ensures that caveats don't recommend unsupported or unsafe operations.
-      #
-      # ### Example
-      #
-      # ```ruby
-      # # bad
-      # def caveats
-      #   <<~EOS
-      #     Use `setuid` to allow running the exeutable by non-root users.
-      #   EOS
-      # end
-      #
-      # # good
-      # def caveats
-      #   <<~EOS
-      #     Use `sudo` to run the executable.
-      #   EOS
-      # end
-      # ```
       class Caveats < FormulaCop
-        sig { override.params(_formula_nodes: FormulaNodes).void }
-        def audit_formula(_formula_nodes)
+        def audit_formula(_node, _class_node, _parent_class_node, _body_node)
           caveats_strings.each do |n|
-            if regex_match_group(n, /\bsetuid\b/i)
-              problem "Don't recommend `setuid` in the caveats, suggest `sudo` instead."
-            end
+            next unless regex_match_group(n, /\bsetuid\b/i)
 
-            problem "Don't use ANSI escape codes in the caveats." if regex_match_group(n, /\e/)
+            problem "Don't recommend setuid in the caveats, suggest sudo instead."
           end
         end
       end

@@ -2,12 +2,12 @@
 
 require_relative "shared_examples"
 
-RSpec.describe UnpackStrategy::Mercurial do
-  let(:repo) do
+describe UnpackStrategy::Mercurial do
+  let(:repo) {
     mktmpdir.tap do |repo|
       (repo/".hg").mkpath
     end
-  end
+  }
   let(:path) { repo }
 
   include_examples "UnpackStrategy::detect"

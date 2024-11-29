@@ -1,17 +1,18 @@
 # frozen_string_literal: true
 
 require "extend/ENV"
-require "cmd/reinstall"
 require "cmd/shared_examples/args_parse"
 
-RSpec.describe Homebrew::Cmd::Reinstall do
+describe "Homebrew.reinstall_args" do
   it_behaves_like "parseable arguments"
+end
 
-  it "reinstalls a Formula", :integration_test do
+describe "brew reinstall", :integration_test do
+  it "reinstalls a Formula" do
     install_test_formula "testball"
     foo_dir = HOMEBREW_CELLAR/"testball/0.1/bin"
     expect(foo_dir).to exist
-    FileUtils.rm_r(foo_dir)
+    foo_dir.rmtree
 
     expect { brew "reinstall", "testball" }
       .to output(/Reinstalling testball/).to_stdout

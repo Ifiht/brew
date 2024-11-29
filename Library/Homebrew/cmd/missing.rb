@@ -1,46 +1,48 @@
-# typed: strict
 # frozen_string_literal: true
 
-require "abstract_command"
 require "formula"
 require "tab"
 require "diagnostic"
+require "cli/parser"
 
 module Homebrew
-  module Cmd
-    class Missing < AbstractCommand
-      cmd_args do
-        description <<~EOS
-          Check the given <formula> kegs for missing dependencies. If no <formula> are
-          provided, check all kegs. Will exit with a non-zero status if any kegs are found
-          to be missing dependencies.
-        EOS
-        comma_array "--hide",
-                    description: "Act as if none of the specified <hidden> are installed. <hidden> should be " \
-                                 "a comma-separated list of formulae."
+  module_function
 
-        named_args :formula
-      end
+  def missing_args
+    Homebrew::CLI::Parser.new do
+      usage_banner <<~EOS
+        `missing` [<options>] [<formula>]
 
-      sig { override.void }
-      def run
-        return unless HOMEBREW_CELLAR.exist?
+        Check the given <formula> kegs for missing dependencies. If no <formula> are
+        provided, check all kegs. Will exit with a non-zero status if any kegs are found
+        to be missing dependencies.
+      EOS
+      comma_array "--hide",
+                  description: "Act as if none of the specified <hidden> are installed. <hidden> should be "\
+                               "a comma-separated list of formulae."
+      switch :verbose
+      switch :debug
+    end
+  end
 
-        ff = if args.no_named?
-          Formula.installed.sort
-        else
-          args.named.to_resolved_formulae.sort
-        end
+  def missing
+    missing_args.parse
 
-        ff.each do |f|
-          missing = f.missing_dependencies(hide: args.hide)
-          next if missing.empty?
+    return unless HOMEBREW_CELLAR.exist?
 
-          Homebrew.failed = true
-          print "#{f}: " if ff.size > 1
-          puts missing.join(" ")
-        end
-      end
+    ff = if args.no_named?
+      Formula.installed.sort
+    else
+      args.resolved_formulae.sort
+    end
+
+    ff.each do |f|
+      missing = f.missing_dependencies(hide: args.hide)
+      next if missing.empty?
+
+      Homebrew.failed = true
+      print "#{f}: " if ff.size > 1
+      puts missing.join(" ")
     end
   end
 end

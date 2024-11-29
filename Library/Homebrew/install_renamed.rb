@@ -1,7 +1,5 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
-# Helper module for installing default files.
 module InstallRenamed
   def install_p(_, new_basename)
     super do |src, dst|
@@ -21,11 +19,11 @@ module InstallRenamed
   end
 
   def +(other)
-    super.extend(InstallRenamed)
+    super(other).extend(InstallRenamed)
   end
 
   def /(other)
-    super.extend(InstallRenamed)
+    super(other).extend(InstallRenamed)
   end
 
   private

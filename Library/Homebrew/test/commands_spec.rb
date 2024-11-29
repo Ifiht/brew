@@ -2,7 +2,7 @@
 
 require "commands"
 
-RSpec.shared_context "custom internal commands" do # rubocop:disable RSpec/ContextWording
+RSpec.shared_context "custom internal commands" do
   let(:cmds) do
     [
       # internal commands
@@ -26,7 +26,7 @@ RSpec.shared_context "custom internal commands" do # rubocop:disable RSpec/Conte
   end
 end
 
-RSpec.describe Commands do
+describe Commands do
   include_context "custom internal commands"
 
   specify "::internal_commands" do
@@ -53,7 +53,7 @@ RSpec.describe Commands do
 
       FileUtils.touch "#{dir}/brew-t4"
 
-      allow(described_class).to receive(:tap_cmd_directories).and_return([dir])
+      allow(Tap).to receive(:cmd_directories).and_return([dir])
 
       cmds = described_class.external_commands
 
@@ -69,7 +69,7 @@ RSpec.describe Commands do
     specify "returns the path for an internal command" do
       expect(described_class.path("rbcmd")).to eq(HOMEBREW_LIBRARY_PATH/"cmd/rbcmd.rb")
       expect(described_class.path("shcmd")).to eq(HOMEBREW_LIBRARY_PATH/"cmd/shcmd.sh")
-      expect(described_class.path("idontexist1234")).to be_nil
+      expect(described_class.path("idontexist1234")).to be nil
     end
 
     specify "returns the path for an internal developer-command" do

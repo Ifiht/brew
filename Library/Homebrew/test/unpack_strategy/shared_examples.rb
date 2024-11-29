@@ -2,13 +2,13 @@
 
 require "unpack_strategy"
 
-RSpec.shared_examples "UnpackStrategy::detect" do
+shared_examples "UnpackStrategy::detect" do
   it "is correctly detected" do
     expect(UnpackStrategy.detect(path)).to be_a described_class
   end
 end
 
-RSpec.shared_examples "#extract" do |children: []|
+shared_examples "#extract" do |children: []|
   specify "#extract" do
     mktmpdir do |unpack_dir|
       described_class.new(path).extract(to: unpack_dir)

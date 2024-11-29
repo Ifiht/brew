@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe Cask::Artifact::PreflightBlock, :cask do
+describe Cask::Artifact::PreflightBlock, :cask do
   describe "install_phase" do
     it "calls the specified block before installing, passing a Cask mini-dsl" do
       called = false
@@ -18,7 +18,7 @@ RSpec.describe Cask::Artifact::PreflightBlock, :cask do
       end
 
       expect(called).to be true
-      expect(yielded_arg).to be_a Cask::DSL::Preflight
+      expect(yielded_arg).to be_kind_of Cask::DSL::Preflight
     end
   end
 
@@ -39,7 +39,7 @@ RSpec.describe Cask::Artifact::PreflightBlock, :cask do
       end
 
       expect(called).to be true
-      expect(yielded_arg).to be_a Cask::DSL::UninstallPreflight
+      expect(yielded_arg).to be_kind_of Cask::DSL::UninstallPreflight
     end
   end
 end

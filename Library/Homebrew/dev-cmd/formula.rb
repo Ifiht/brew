@@ -1,30 +1,27 @@
-# typed: strict
 # frozen_string_literal: true
 
-require "abstract_command"
 require "formula"
+require "cli/parser"
 
 module Homebrew
-  module DevCmd
-    class FormulaCmd < AbstractCommand
-      cmd_args do
-        description <<~EOS
-          Display the path where <formula> is located.
-        EOS
+  module_function
 
-        named_args :formula, min: 1, without_api: true
-      end
+  def formula_args
+    Homebrew::CLI::Parser.new do
+      usage_banner <<~EOS
+        `formula` <formula>
 
-      sig { override.void }
-      def run
-        formula_paths = args.named.to_paths(only: :formula).select(&:exist?)
-        if formula_paths.blank? && args.named
-                                       .to_paths(only: :cask)
-                                       .any?(&:exist?)
-          odie "Found casks but did not find formulae!"
-        end
-        formula_paths.each { puts _1 }
-      end
+        Display the path where <formula> is located.
+      EOS
+      switch :verbose
+      switch :debug
+      min_named :formula
     end
+  end
+
+  def formula
+    formula_args.parse
+
+    args.formulae_paths.each(&method(:puts))
   end
 end

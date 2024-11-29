@@ -2,7 +2,7 @@
 
 require "requirements/linux_requirement"
 
-RSpec.describe LinuxRequirement do
+describe LinuxRequirement do
   subject(:requirement) { described_class.new }
 
   describe "#satisfied?" do

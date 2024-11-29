@@ -1,23 +1,17 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
 require "version"
 
-# Combination of a version and a revision.
 class PkgVersion
   include Comparable
-  extend Forwardable
 
-  REGEX = /\A(.+?)(?:_(\d+))?\z/
-  private_constant :REGEX
+  RX = /\A(.+?)(?:_(\d+))?\z/.freeze
 
   attr_reader :version, :revision
 
-  delegate [:major, :minor, :patch, :major_minor, :major_minor_patch] => :version
-
   def self.parse(path)
-    _, version, revision = *path.match(REGEX)
-    version = Version.new(version)
+    _, version, revision = *path.match(RX)
+    version = Version.create(version)
     new(version, revision.to_i)
   end
 
@@ -30,17 +24,14 @@ class PkgVersion
     version.head?
   end
 
-  sig { returns(String) }
-  def to_str
+  def to_s
     if revision.positive?
       "#{version}_#{revision}"
     else
       version.to_s
     end
   end
-
-  sig { returns(String) }
-  def to_s = to_str
+  alias to_str to_s
 
   def <=>(other)
     return unless other.is_a?(PkgVersion)
@@ -53,6 +44,6 @@ class PkgVersion
   alias eql? ==
 
   def hash
-    [version, revision].hash
+    version.hash ^ revision.hash
   end
 end

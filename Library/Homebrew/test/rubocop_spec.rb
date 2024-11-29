@@ -2,24 +2,18 @@
 
 require "open3"
 
-RSpec.describe "RuboCop" do
+describe "RuboCop" do
   context "when calling `rubocop` outside of the Homebrew environment" do
     before do
       ENV.each_key do |key|
-        allowlist = %w[
-          HOMEBREW_TESTS
-          HOMEBREW_USE_RUBY_FROM_PATH
-        ]
-        ENV.delete(key) if key.start_with?("HOMEBREW_") && allowlist.exclude?(key)
+        ENV.delete(key) if key.start_with?("HOMEBREW_")
       end
 
-      ENV["XDG_CACHE_HOME"] = (HOMEBREW_CACHE.realpath/"style").to_s
+      ENV["XDG_CACHE_HOME"] = "#{HOMEBREW_CACHE}/style"
     end
 
     it "loads all Formula cops without errors" do
-      stdout, stderr, status = Open3.capture3(RUBY_PATH, "-W0", "-S", "rubocop", TEST_FIXTURE_DIR/"testball.rb")
-      expect(stderr).to be_empty
-      expect(stdout).to include("no offenses detected")
+      _, _, status = Open3.capture3("rubocop", TEST_FIXTURE_DIR/"testball.rb")
       expect(status).to be_a_success
     end
   end

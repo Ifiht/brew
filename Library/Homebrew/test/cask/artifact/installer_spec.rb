@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-RSpec.describe Cask::Artifact::Installer, :cask do
+describe Cask::Artifact::Installer, :cask do
   subject(:installer) { described_class.new(cask, **args) }
 
   let(:staged_path) { mktmpdir }
-  let(:cask) { instance_double(Cask::Cask, staged_path:) }
+  let(:cask) { instance_double(Cask::Cask, staged_path: staged_path) }
 
   let(:command) { SystemCommand }
 
@@ -15,9 +15,9 @@ RSpec.describe Cask::Artifact::Installer, :cask do
       let(:args) { { manual: "installer" } }
 
       it "shows a message prompting to run the installer manually" do
-        expect do
-          installer.install_phase(command:)
-        end.to output(%r{open #{staged_path}/installer}).to_stdout
+        expect {
+          installer.install_phase(command: command)
+        }.to output(%r{run the installer at:\s+'#{staged_path}/installer'}).to_stdout
       end
     end
 
@@ -33,11 +33,11 @@ RSpec.describe Cask::Artifact::Installer, :cask do
         expect(command).to receive(:run!).with(
           executable,
           a_hash_including(
-            env: { "PATH" => PATH.new("#{HOMEBREW_PREFIX}/bin", "#{HOMEBREW_PREFIX}/sbin", ENV.fetch("PATH")) },
+            env: { "PATH" => PATH.new("#{HOMEBREW_PREFIX}/bin", "#{HOMEBREW_PREFIX}/sbin", ENV["PATH"]) },
           ),
         )
 
-        installer.install_phase(command:)
+        installer.install_phase(command: command)
       end
     end
   end

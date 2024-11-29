@@ -1,13 +1,10 @@
 extends: capitalization
 message: "'%s' should be in title case"
-level: error
+level: warning
 scope: heading.h1
 match: $title
 style: AP
 exceptions:
   - brew(1)
-  - macOS
-  - Homebrew/brew
   - Homebrew/homebrew-core
-  - Homebrew/homebrew-cask
-  - (or Linux)
+  - Homebrew/linuxbrew-core

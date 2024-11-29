@@ -1,61 +1,46 @@
-# typed: strict
 # frozen_string_literal: true
 
-# A {Messages} object collects messages that may need to be displayed together
+# A Messages object collects messages that may need to be displayed together
 # at the end of a multi-step `brew` command run.
 class Messages
-  sig { returns(T::Array[T::Hash[Symbol, Symbol]]) }
-  attr_reader :caveats
+  attr_reader :caveats, :formula_count, :install_times
 
-  sig { returns(Integer) }
-  attr_reader :package_count
-
-  sig { returns(T::Array[T::Hash[String, Float]]) }
-  attr_reader :install_times
-
-  sig { void }
   def initialize
-    @caveats = T.let([], T::Array[T::Hash[Symbol, Symbol]])
-    @package_count = T.let(0, Integer)
-    @install_times = T.let([], T::Array[T::Hash[String, Float]])
+    @caveats = []
+    @formula_count = 0
+    @install_times = []
   end
 
-  sig { params(package: String, caveats: T.any(String, Caveats)).void }
-  def record_caveats(package, caveats)
-    @caveats.push(package:, caveats:)
+  def record_caveats(f, caveats)
+    @caveats.push(formula: f.name, caveats: caveats)
   end
 
-  sig { params(package: String, elapsed_time: Float).void }
-  def package_installed(package, elapsed_time)
-    @package_count += 1
-    @install_times.push(package:, time: elapsed_time)
+  def formula_installed(f, elapsed_time)
+    @formula_count += 1
+    @install_times.push(formula: f.name, time: elapsed_time)
   end
 
-  sig { params(force_caveats: T::Boolean, display_times: T::Boolean).void }
-  def display_messages(force_caveats: false, display_times: false)
-    display_caveats(force: force_caveats)
-    display_install_times if display_times
+  def display_messages
+    display_caveats
+    display_install_times if Homebrew.args.display_times?
   end
 
-  sig { params(force: T::Boolean).void }
-  def display_caveats(force: false)
-    return if @package_count.zero?
-    return if @package_count == 1 && !force
+  def display_caveats
+    return if @formula_count <= 1
     return if @caveats.empty?
 
     oh1 "Caveats"
     @caveats.each do |c|
-      ohai c[:package], c[:caveats]
+      ohai c[:formula], c[:caveats]
     end
   end
 
-  sig { void }
   def display_install_times
     return if install_times.empty?
 
     oh1 "Installation times"
     install_times.each do |t|
-      puts format("%<package>-20s %<time>10.3f s", t)
+      puts format("%<formula>-20s %<time>10.3f s", t)
     end
   end
 end

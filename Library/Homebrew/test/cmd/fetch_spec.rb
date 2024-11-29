@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
-require "cmd/fetch"
 require "cmd/shared_examples/args_parse"
 
-RSpec.describe Homebrew::Cmd::FetchCmd do
+describe "Homebrew.fetch_args" do
   it_behaves_like "parseable arguments"
+end
 
-  it "downloads the Formula's URL", :integration_test do
+describe "brew fetch", :integration_test do
+  it "downloads the Formula's URL" do
     setup_test_formula "testball"
 
     expect { brew "fetch", "testball" }.to be_a_success

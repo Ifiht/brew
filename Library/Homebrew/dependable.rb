@@ -1,15 +1,11 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
 require "options"
 
-# Shared functions for classes which can be depended upon.
 module Dependable
-  # `:run` and `:linked` are no longer used but keep them here to avoid their
-  # misuse in future.
-  RESERVED_TAGS = [:build, :optional, :recommended, :run, :test, :linked, :implicit].freeze
-
-  attr_reader :tags
+  # `:run` and `:linked` are no longer used but keep them here to avoid them being
+  # misused in future.
+  RESERVED_TAGS = [:build, :optional, :recommended, :run, :test, :linked].freeze
 
   def build?
     tags.include? :build
@@ -27,10 +23,6 @@ module Dependable
     tags.include? :test
   end
 
-  def implicit?
-    tags.include? :implicit
-  end
-
   def required?
     !build? && !test? && !optional? && !recommended?
   end
@@ -44,7 +36,7 @@ module Dependable
   end
 
   def prune_from_option?(build)
-    return false if !optional? && !recommended?
+    return if !optional? && !recommended?
 
     build.without?(self)
   end

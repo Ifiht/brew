@@ -1,15 +1,24 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
-require "attrable"
 require "mutex_m"
-require "ignorable"
+require "debrew/irb"
 
-# Helper module for debugging formulae.
 module Debrew
   extend Mutex_m
 
-  # Module for allowing to debug formulae.
+  Ignorable = Module.new.freeze
+
+  module Raise
+    def raise(*)
+      super
+    rescue Exception => e # rubocop:disable Lint/RescueException
+      e.extend(Ignorable)
+      super(e) unless Debrew.debug(e) == :ignore
+    end
+
+    alias fail raise
+  end
+
   module Formula
     def install
       Debrew.debrew { super }
@@ -24,13 +33,11 @@ module Debrew
     end
   end
 
-  # Module for displaying a debugging menu.
   class Menu
     Entry = Struct.new(:name, :action)
 
     attr_accessor :prompt, :entries
 
-    sig { void }
     def initialize
       @entries = []
     end
@@ -43,7 +50,7 @@ module Debrew
       menu = new
       yield menu
 
-      choice = T.let(nil, T.nilable(Entry))
+      choice = nil
       while choice.nil?
         menu.entries.each_with_index { |e, i| puts "#{i + 1}. #{e.name}" }
         print menu.prompt unless menu.prompt.nil?
@@ -73,52 +80,51 @@ module Debrew
   @debugged_exceptions = Set.new
 
   class << self
-    extend Attrable
+    extend Predicable
+    alias original_raise raise
     attr_predicate :active?
     attr_reader :debugged_exceptions
   end
 
   def self.debrew
     @active = true
-    Ignorable.hook_raise
+    Object.include Raise
 
     begin
       yield
     rescue SystemExit
-      raise
-    rescue Ignorable::ExceptionMixin => e
-      e.ignore if debug(e) == :ignore # execution jumps back to where the exception was thrown
+      original_raise
+    rescue Exception => e # rubocop:disable Lint/RescueException
+      debug(e)
     ensure
-      Ignorable.unhook_raise
       @active = false
     end
   end
 
-  def self.debug(exception)
-    raise(exception) if !active? || !debugged_exceptions.add?(exception) || !mu_try_lock
+  def self.debug(e)
+    original_raise(e) unless active? &&
+                             debugged_exceptions.add?(e) &&
+                             try_lock
 
     begin
-      puts exception.backtrace.first
-      puts Formatter.error(exception, label: exception.class.name)
+      puts e.backtrace.first.to_s
+      puts Formatter.error(e, label: e.class.name)
 
       loop do
         Menu.choose do |menu|
           menu.prompt = "Choose an action: "
 
-          menu.choice(:raise) { raise(exception) }
-          menu.choice(:ignore) { return :ignore } if exception.is_a?(Ignorable::ExceptionMixin)
-          menu.choice(:backtrace) { puts exception.backtrace }
+          menu.choice(:raise) { original_raise(e) }
+          menu.choice(:ignore) { return :ignore } if e.is_a?(Ignorable)
+          menu.choice(:backtrace) { puts e.backtrace }
 
-          if exception.is_a?(Ignorable::ExceptionMixin)
+          if e.is_a?(Ignorable)
             menu.choice(:irb) do
               puts "When you exit this IRB session, execution will continue."
               set_trace_func proc { |event, _, _, id, binding, klass|
-                if klass == Object && id == :raise && event == "return"
+                if klass == Raise && id == :raise && event == "return"
                   set_trace_func(nil)
-                  mu_synchronize do
-                    require "debrew/irb"
-                    IRB.start_within(binding)
-                  end
+                  synchronize { IRB.start_within(binding) }
                 end
               }
 
@@ -133,7 +139,7 @@ module Debrew
         end
       end
     ensure
-      mu_unlock
+      unlock
     end
   end
 end

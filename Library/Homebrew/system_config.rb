@@ -1,18 +1,13 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
 require "hardware"
 require "software_spec"
+require "rexml/document"
 require "development_tools"
 require "extend/ENV"
-require "system_command"
-require "git_repository"
 
-# Helper module for querying information about the system configuration.
-module SystemConfig
+class SystemConfig
   class << self
-    include SystemCommand::Mixin
-
     def clang
       @clang ||= if DevelopmentTools.installed?
         DevelopmentTools.clang_version
@@ -29,40 +24,28 @@ module SystemConfig
       end
     end
 
-    sig { returns(GitRepository) }
-    def homebrew_repo
-      GitRepository.new(HOMEBREW_REPOSITORY)
-    end
-
-    sig { returns(String) }
-    def branch
-      homebrew_repo.branch_name || "(none)"
-    end
-
-    sig { returns(String) }
     def head
-      homebrew_repo.head_ref || "(none)"
+      HOMEBREW_REPOSITORY.git_head || "(none)"
     end
 
-    sig { returns(String) }
     def last_commit
-      homebrew_repo.last_committed || "never"
+      HOMEBREW_REPOSITORY.git_last_commit || "never"
     end
 
-    sig { returns(String) }
     def origin
-      homebrew_repo.origin_url || "(none)"
+      HOMEBREW_REPOSITORY.git_origin || "(none)"
     end
 
-    sig { returns(String) }
-    def describe_clang
-      return "N/A" if clang.null?
+    def core_tap_head
+      CoreTap.instance.git_head || "(none)"
+    end
 
-      if clang_build.null?
-        clang.to_s
-      else
-        "#{clang} build #{clang_build}"
-      end
+    def core_tap_last_commit
+      CoreTap.instance.git_last_commit || "never"
+    end
+
+    def core_tap_origin
+      CoreTap.instance.remote || "(none)"
     end
 
     def describe_path(path)
@@ -76,123 +59,113 @@ module SystemConfig
       end
     end
 
-    sig { returns(String) }
-    def describe_homebrew_ruby
-      "#{RUBY_VERSION} => #{RUBY_PATH}"
+    def describe_homebrew_ruby_version
+      case RUBY_VERSION
+      when /^1\.[89]/, /^2\.0/
+        "#{RUBY_VERSION}-p#{RUBY_PATCHLEVEL}"
+      else
+        RUBY_VERSION
+      end
     end
 
-    sig { returns(T.nilable(String)) }
+    def describe_homebrew_ruby
+      "#{describe_homebrew_ruby_version} => #{RUBY_PATH}"
+    end
+
     def hardware
       return if Hardware::CPU.type == :dunno
 
       "CPU: #{Hardware.cores_as_words}-core #{Hardware::CPU.bits}-bit #{Hardware::CPU.family}"
     end
 
-    sig { returns(String) }
     def kernel
       `uname -m`.chomp
     end
 
-    sig { returns(String) }
-    def describe_git
-      return "N/A" unless Utils::Git.available?
+    def describe_java
+      return "N/A" unless which "java"
 
-      "#{Utils::Git.version} => #{Utils::Git.path}"
+      _, err, status = system_command("java", args: ["-version"], print_stderr: false)
+      return "N/A" unless status.success?
+
+      err[/java version "([\d._]+)"/, 1] || "N/A"
     end
 
-    sig { returns(String) }
-    def describe_curl
-      out, = system_command(Utils::Curl.curl_executable, args: ["--version"], verbose: false)
+    def describe_git
+      return "N/A" unless Utils.git_available?
 
-      match_data = /^curl (?<curl_version>[\d.]+)/.match(out)
-      if match_data
-        "#{match_data[:curl_version]} => #{Utils::Curl.curl_path}"
+      "#{Utils.git_version} => #{Utils.git_path}"
+    end
+
+    def describe_curl
+      out, = system_command(curl_executable, args: ["--version"])
+
+      if /^curl (?<curl_version>[\d.]+)/ =~ out
+        "#{curl_version} => #{curl_executable}"
       else
         "N/A"
       end
     end
 
-    def dump_tap_config(tap, out = $stdout)
-      case tap
-      when CoreTap
-        tap_name = "Core tap"
-        json_file_name = "formula.jws.json"
-      when CoreCaskTap
-        tap_name = "Core cask tap"
-        json_file_name = "cask.jws.json"
+    def dump_verbose_config(f = $stdout)
+      f.puts "HOMEBREW_VERSION: #{HOMEBREW_VERSION}"
+      f.puts "ORIGIN: #{origin}"
+      f.puts "HEAD: #{head}"
+      f.puts "Last commit: #{last_commit}"
+      if CoreTap.instance.installed?
+        f.puts "Core tap ORIGIN: #{core_tap_origin}"
+        f.puts "Core tap HEAD: #{core_tap_head}"
+        f.puts "Core tap last commit: #{core_tap_last_commit}"
       else
-        raise ArgumentError, "Unknown tap: #{tap}"
+        f.puts "Core tap: N/A"
       end
-
-      if tap.installed?
-        out.puts "#{tap_name} origin: #{tap.remote}" if tap.remote != tap.default_remote
-        out.puts "#{tap_name} HEAD: #{tap.git_head || "(none)"}"
-        out.puts "#{tap_name} last commit: #{tap.git_last_commit || "never"}"
-        out.puts "#{tap_name} branch: #{tap.git_branch || "(none)"}" if tap.git_branch != "master"
-      end
-
-      if (json_file = Homebrew::API::HOMEBREW_CACHE_API/json_file_name) && json_file.exist?
-        out.puts "#{tap_name} JSON: #{json_file.mtime.utc.strftime("%d %b %H:%M UTC")}"
-      elsif !tap.installed?
-        out.puts "#{tap_name}: N/A"
-      end
-    end
-
-    def core_tap_config(out = $stdout)
-      dump_tap_config(CoreTap.instance, out)
-    end
-
-    def homebrew_config(out = $stdout)
-      out.puts "HOMEBREW_VERSION: #{HOMEBREW_VERSION}"
-      out.puts "ORIGIN: #{origin}"
-      out.puts "HEAD: #{head}"
-      out.puts "Last commit: #{last_commit}"
-      out.puts "Branch: #{branch}"
-    end
-
-    def homebrew_env_config(out = $stdout)
-      out.puts "HOMEBREW_PREFIX: #{HOMEBREW_PREFIX}"
+      f.puts "HOMEBREW_PREFIX: #{HOMEBREW_PREFIX}"
       {
         HOMEBREW_REPOSITORY: Homebrew::DEFAULT_REPOSITORY,
         HOMEBREW_CELLAR:     Homebrew::DEFAULT_CELLAR,
       }.freeze.each do |key, default|
         value = Object.const_get(key)
-        out.puts "#{key}: #{value}" if value.to_s != default.to_s
+        f.puts "#{key}: #{value}" if value.to_s != default.to_s
       end
 
       Homebrew::EnvConfig::ENVS.each do |env, hash|
         method_name = Homebrew::EnvConfig.env_method_name(env, hash)
 
         if hash[:boolean]
-          out.puts "#{env}: set" if Homebrew::EnvConfig.send(method_name)
+          f.puts "#{env}: set" if Homebrew::EnvConfig.send(method_name)
           next
         end
 
         value = Homebrew::EnvConfig.send(method_name)
         next unless value
-        next if (default = hash[:default].presence) && value.to_s == default.to_s
+
+        if (default = hash[:default].presence)
+          next if value.to_s == default.to_s
+        end
 
         if ENV.sensitive?(env)
-          out.puts "#{env}: set"
+          f.puts "#{env}: set"
         else
-          out.puts "#{env}: #{value}"
+          f.puts "#{env}: #{value}"
         end
       end
-      out.puts "Homebrew Ruby: #{describe_homebrew_ruby}"
-    end
 
-    def host_software_config(out = $stdout)
-      out.puts "Clang: #{describe_clang}"
-      out.puts "Git: #{describe_git}"
-      out.puts "Curl: #{describe_curl}"
-    end
-
-    def dump_verbose_config(out = $stdout)
-      homebrew_config(out)
-      core_tap_config(out)
-      homebrew_env_config(out)
-      out.puts hardware if hardware
-      host_software_config(out)
+      f.puts hardware if hardware
+      f.puts "Homebrew Ruby: #{describe_homebrew_ruby}"
+      f.print "Clang: "
+      if clang.null?
+        f.puts "N/A"
+      else
+        f.print "#{clang} build "
+        if clang_build.null?
+          f.puts "(parse error)"
+        else
+          f.puts clang_build
+        end
+      end
+      f.puts "Git: #{describe_git}"
+      f.puts "Curl: #{describe_curl}"
+      f.puts "Java: #{describe_java}" if describe_java != "N/A"
     end
     alias dump_generic_verbose_config dump_verbose_config
   end

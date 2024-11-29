@@ -1,33 +1,37 @@
-# typed: strict
 # frozen_string_literal: true
 
 require "cask/artifact/moved"
 
+require "extend/hash_validator"
+using HashValidator
+
 module Cask
   module Artifact
-    # Generic artifact corresponding to the `artifact` stanza.
     class Artifact < Moved
-      sig { returns(String) }
       def self.english_name
         "Generic Artifact"
       end
 
-      sig { params(cask: Cask, args: T.untyped).returns(T.attached_class) }
       def self.from_args(cask, *args)
-        source, options = args
+        source_string, target_hash = args
 
-        raise CaskInvalidError.new(cask.token, "No source provided for #{english_name}.") if source.blank?
+        raise CaskInvalidError.new(cask.token, "no source given for #{english_name}") if source_string.nil?
 
-        unless options&.key?(:target)
-          raise CaskInvalidError.new(cask.token, "#{english_name} '#{source}' requires a target.")
+        unless target_hash.is_a?(Hash)
+          raise CaskInvalidError.new(cask.token, "target required for #{english_name} '#{source_string}'")
         end
 
-        new(cask, source, **options)
+        target_hash.assert_valid_keys!(:target)
+
+        new(cask, source_string, **target_hash)
       end
 
-      sig { params(target: T.any(String, Pathname)).returns(Pathname) }
       def resolve_target(target)
-        super(target, base_dir: nil)
+        Pathname(target)
+      end
+
+      def initialize(cask, source, target: nil)
+        super(cask, source, target: target)
       end
     end
   end

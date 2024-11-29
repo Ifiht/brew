@@ -2,31 +2,30 @@
 
 import Foundation
 
-let manager = FileManager.default
+extension FileHandle : TextOutputStream {
+  public func write(_ string: String) {
+    self.write(string.data(using: .utf8)!)
+  }
+}
+
+var stderr = FileHandle.standardError
+
+let manager: FileManager = FileManager()
 
 var success = true
 
-// The command line arguments given but without the script's name
-let CMDLineArgs = Array(CommandLine.arguments.dropFirst())
-
-var trashed: [String] = []
-var untrashable: [String] = []
-for item in CMDLineArgs {
-    do {
-        let url = URL(fileURLWithPath: item)
-        var trashedPath: NSURL!
-        try manager.trashItem(at: url, resultingItemURL: &trashedPath)
-        trashed.append((trashedPath as URL).path)
-        success = true
-    } catch {
-        untrashable.append(item)
-        success = false
-    }
+for item in CommandLine.arguments[1...] {
+  do {
+    let path: URL = URL(fileURLWithPath: item)
+    var trashedPath: NSURL!
+    try manager.trashItem(at: path, resultingItemURL: &trashedPath)
+    print((trashedPath as URL).path, terminator: ":")
+  } catch {
+    print(item, terminator: ":", to: &stderr)
+    success = false
+  }
 }
 
-print(trashed.joined(separator: ":"))
-print(untrashable.joined(separator: ":"), terminator: "")
-
 guard success else {
-    exit(1)
+  exit(1)
 }

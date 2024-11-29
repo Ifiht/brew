@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
-require "cmd/pin"
 require "cmd/shared_examples/args_parse"
 
-RSpec.describe Homebrew::Cmd::Pin do
+describe "Homebrew.pin_args" do
   it_behaves_like "parseable arguments"
+end
 
-  it "pins a Formula's version", :integration_test do
+describe "brew pin", :integration_test do
+  it "pins a Formula's version" do
     install_test_formula "testball"
 
     expect { brew "pin", "testball" }.to be_a_success

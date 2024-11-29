@@ -1,4 +1,3 @@
-# typed: strict
 # frozen_string_literal: true
 
 require "delegate"
@@ -6,12 +5,7 @@ require "etc"
 
 require "system_command"
 
-# A system user.
-class User < SimpleDelegator
-  include SystemCommand::Mixin
-
-  # Return whether the user has an active GUI session.
-  sig { returns(T::Boolean) }
+class User < DelegateClass(String)
   def gui?
     out, _, status = system_command "who"
     return false unless status.success?
@@ -21,14 +15,7 @@ class User < SimpleDelegator
        .any? { |user, type,| user == self && type == "console" }
   end
 
-  # Return the current user.
-  sig { returns(T.nilable(T.attached_class)) }
   def self.current
-    return @current if defined?(@current)
-
-    pwuid = Etc.getpwuid(Process.euid)
-    return if pwuid.nil?
-
-    @current = T.let(new(pwuid.name), T.nilable(T.attached_class))
+    @current ||= new(Etc.getpwuid(Process.euid).name)
   end
 end

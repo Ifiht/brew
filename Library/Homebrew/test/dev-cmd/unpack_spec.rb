@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
 require "cmd/shared_examples/args_parse"
-require "dev-cmd/unpack"
 
-RSpec.describe Homebrew::DevCmd::Unpack do
+describe "Homebrew.unpack_args" do
   it_behaves_like "parseable arguments"
+end
 
-  it "unpacks a given Formula's archive", :integration_test do
+describe "brew unpack", :integration_test do
+  it "unpacks a given Formula's archive" do
     setup_test_formula "testball"
 
     mktmpdir do |path|

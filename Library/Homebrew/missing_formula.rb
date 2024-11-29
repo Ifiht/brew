@@ -1,19 +1,15 @@
-# typed: strict
 # frozen_string_literal: true
 
 require "formulary"
 
 module Homebrew
-  # Helper module for checking if there is a reason a formula is missing.
   module MissingFormula
     class << self
-      sig { params(name: String, silent: T::Boolean, show_info: T::Boolean).returns(T.nilable(String)) }
       def reason(name, silent: false, show_info: false)
-        cask_reason(name, silent:, show_info:) || disallowed_reason(name) ||
-          tap_migration_reason(name) || deleted_reason(name, silent:)
+        cask_reason(name, silent: silent, show_info: show_info) || disallowed_reason(name) ||
+          tap_migration_reason(name) || deleted_reason(name, silent: silent)
       end
 
-      sig { params(name: String).returns(T.nilable(String)) }
       def disallowed_reason(name)
         case name.downcase
         when "gem", /^rubygems?$/ then <<~EOS
@@ -26,19 +22,31 @@ module Homebrew
         EOS
         when "pil" then <<~EOS
           Instead of PIL, consider pillow:
-            brew install pillow
+            pip2 install pillow
         EOS
         when "macruby" then <<~EOS
           MacRuby has been discontinued. Consider RubyMotion:
-            brew install --cask rubymotion
+            brew cask install rubymotion
         EOS
         when /(lib)?lzma/ then <<~EOS
           lzma is now part of the xz formula:
             brew install xz
         EOS
+        when "gtest", "googletest", "google-test" then <<~EOS
+          Installing gtest system-wide is not recommended; it should be vendored
+          in your projects that use it.
+        EOS
+        when "gmock", "googlemock", "google-mock" then <<~EOS
+          Installing gmock system-wide is not recommended; it should be vendored
+          in your projects that use it.
+        EOS
+        when "sshpass" then <<~EOS
+          We won't add sshpass because it makes it too easy for novice SSH users to
+          ruin SSH's security.
+        EOS
         when "gsutil" then <<~EOS
           gsutil is available through pip:
-            pip3 install gsutil
+            pip2 install gsutil
         EOS
         when "gfortran" then <<~EOS
           GNU Fortran is part of the GCC formula:
@@ -70,8 +78,8 @@ module Homebrew
         when "ngrok" then <<~EOS
           Upstream sunsetted 1.x in March 2016 and 2.x is not open-source.
 
-          If you wish to use the 2.x release you can install it with:
-            brew install --cask ngrok
+          If you wish to use the 2.x release you can install with Homebrew Cask:
+            brew cask install ngrok
         EOS
         when "cargo" then <<~EOS
           cargo is part of the rust formula:
@@ -85,19 +93,12 @@ module Homebrew
           uconv is part of the icu4c formula:
             brew install icu4c
         EOS
-        when "postgresql", "postgres" then <<~EOS
-          postgresql breaks existing databases on upgrade without human intervention.
-
-          See a more specific version to install with:
-            brew formulae | grep postgresql@
-        EOS
         end
       end
       alias generic_disallowed_reason disallowed_reason
 
-      sig { params(name: String).returns(T.nilable(String)) }
       def tap_migration_reason(name)
-        message = T.let(nil, T.nilable(String))
+        message = nil
 
         Tap.each do |old_tap|
           new_tap = old_tap.tap_migrations[name]
@@ -112,7 +113,7 @@ module Homebrew
           break if new_tap_name == CoreTap.instance.name
 
           install_cmd = if new_tap_name.start_with?("homebrew/cask")
-            "install --cask"
+            "cask install"
           else
             "install"
           end
@@ -130,7 +131,6 @@ module Homebrew
         message
       end
 
-      sig { params(name: String, silent: T::Boolean).returns(T.nilable(String)) }
       def deleted_reason(name, silent: false)
         path = Formulary.path name
         return if File.exist? path
@@ -145,27 +145,13 @@ module Homebrew
             ohai "Searching for a previously deleted formula (in the last month)..."
             if (tap.path/".git/shallow").exist?
               opoo <<~EOS
-                #{tap} is shallow clone. To get its complete history, run:
+                #{tap} is shallow clone. To get complete history run:
                   git -C "$(brew --repo #{tap})" fetch --unshallow
 
               EOS
             end
           end
 
-          # Optimization for the core tap which has many monthly commits
-          if tap.core_tap?
-            # Check if the formula has been deleted in the last month.
-            diff_command = ["git", "diff", "--diff-filter=D", "--name-only",
-                            "@{'1 month ago'}", "--", relative_path]
-            deleted_formula = Utils.popen_read(*diff_command)
-
-            if deleted_formula.blank?
-              ofail "No previously deleted formula found." unless silent
-              return
-            end
-          end
-
-          # Find commit where formula was deleted in the last month.
           log_command = "git log --since='1 month ago' --diff-filter=D " \
                         "--name-only --max-count=1 " \
                         "--format=%H\\\\n%h\\\\n%B -- #{relative_path}"
@@ -186,10 +172,10 @@ module Homebrew
             #{name} was deleted from #{tap.name} in commit #{short_hash}:
               #{commit_message}
 
-            To show the formula before removal, run:
+            To show the formula before removal run:
               git -C "$(brew --repo #{tap})" show #{short_hash}^:#{relative_path}
 
-            If you still use this formula, consider creating your own tap:
+            If you still use this formula consider creating your own tap:
               #{Formatter.url("https://docs.brew.sh/How-to-Create-and-Maintain-a-Tap")}
           EOS
         end

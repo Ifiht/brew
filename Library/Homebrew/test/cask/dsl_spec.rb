@@ -1,49 +1,49 @@
 # frozen_string_literal: true
 
-RSpec.describe Cask::DSL, :cask do
-  let(:cask) { Cask::CaskLoader.load(token) }
+describe Cask::DSL, :cask do
+  let(:cask) { Cask::CaskLoader.load(cask_path(token.to_s)) }
   let(:token) { "basic-cask" }
 
-  describe "stanzas" do
-    it "lets you set url, homepage and version" do
-      expect(cask.url.to_s).to eq("https://brew.sh/TestCask-1.2.3.dmg")
+  context "stanzas" do
+    it "lets you set url, homepage, and version" do
+      expect(cask.url.to_s).to eq("https://brew.sh/TestCask.dmg")
       expect(cask.homepage).to eq("https://brew.sh/")
       expect(cask.version.to_s).to eq("1.2.3")
     end
   end
 
   describe "when a Cask includes an unknown method" do
-    let(:attempt_unknown_method) do
+    let(:attempt_unknown_method) {
       Cask::Cask.new("unexpected-method-cask") do
         future_feature :not_yet_on_your_machine
       end
-    end
+    }
 
-    it "prints an error that it has encountered an unexpected method" do
+    it "prints a warning that it has encountered an unexpected method" do
       expected = Regexp.compile(<<~EOS.lines.map(&:chomp).join)
         (?m)
-        Error:
+        Warning:
         .*
         Unexpected method 'future_feature' called on Cask unexpected-method-cask\\.
         .*
         https://github.com/Homebrew/homebrew-cask#reporting-bugs
       EOS
 
-      expect do
+      expect {
         expect { attempt_unknown_method }.not_to output.to_stdout
-      end.to output(expected).to_stderr
+      }.to output(expected).to_stderr
     end
 
-    it "simply warns, instead of throwing an exception" do
-      expect do
+    it "will simply warn, not throw an exception" do
+      expect {
         attempt_unknown_method
-      end.not_to raise_error
+      }.not_to raise_error
     end
   end
 
   describe "header line" do
     context "when invalid" do
-      let(:token) { "invalid-header-format" }
+      let(:token) { "invalid/invalid-header-format" }
 
       it "raises an error" do
         expect { cask }.to raise_error(Cask::CaskUnreadableError)
@@ -51,12 +51,12 @@ RSpec.describe Cask::DSL, :cask do
     end
 
     context "when token does not match the file name" do
-      let(:token) { "invalid-header-token-mismatch" }
+      let(:token) { "invalid/invalid-header-token-mismatch" }
 
       it "raises an error" do
-        expect do
+        expect {
           cask
-        end.to raise_error(Cask::CaskTokenMismatchError, /header line does not match the file name/)
+        }.to raise_error(Cask::CaskTokenMismatchError, /header line does not match the file name/)
       end
     end
 
@@ -65,7 +65,7 @@ RSpec.describe Cask::DSL, :cask do
 
       it "does not require a DSL version in the header" do
         expect(cask.token).to eq("no-dsl-version")
-        expect(cask.url.to_s).to eq("https://brew.sh/TestCask-1.2.3.dmg")
+        expect(cask.url.to_s).to eq("https://brew.sh/TestCask.dmg")
         expect(cask.homepage).to eq("https://brew.sh/")
         expect(cask.version.to_s).to eq("1.2.3")
       end
@@ -79,8 +79,8 @@ RSpec.describe Cask::DSL, :cask do
       end
 
       expect(cask.name).to eq([
-        "Proper Name",
-      ])
+                                "Proper Name",
+                              ])
     end
 
     it "Accepts an array value to the name stanza" do
@@ -89,9 +89,9 @@ RSpec.describe Cask::DSL, :cask do
       end
 
       expect(cask.name).to eq([
-        "Proper Name",
-        "Alternate Name",
-      ])
+                                "Proper Name",
+                                "Alternate Name",
+                              ])
     end
 
     it "Accepts multiple name stanzas" do
@@ -101,19 +101,9 @@ RSpec.describe Cask::DSL, :cask do
       end
 
       expect(cask.name).to eq([
-        "Proper Name",
-        "Alternate Name",
-      ])
-    end
-  end
-
-  describe "desc stanza" do
-    it "lets you set the description via a desc stanza" do
-      cask = Cask::Cask.new("desc-cask") do
-        desc "The package's description"
-      end
-
-      expect(cask.desc).to eq("The package's description")
+                                "Proper Name",
+                                "Alternate Name",
+                              ])
     end
   end
 
@@ -125,46 +115,18 @@ RSpec.describe Cask::DSL, :cask do
 
       expect(cask.sha256).to eq("imasha2")
     end
-
-    context "with a different arm and intel checksum" do
-      let(:cask) do
-        Cask::Cask.new("checksum-cask") do
-          sha256 arm: "imasha2arm", intel: "imasha2intel"
-        end
-      end
-
-      context "when running on arm" do
-        before do
-          allow(Hardware::CPU).to receive(:type).and_return(:arm)
-        end
-
-        it "stores only the arm checksum" do
-          expect(cask.sha256).to eq("imasha2arm")
-        end
-      end
-
-      context "when running on intel" do
-        before do
-          allow(Hardware::CPU).to receive(:type).and_return(:intel)
-        end
-
-        it "stores only the intel checksum" do
-          expect(cask.sha256).to eq("imasha2intel")
-        end
-      end
-    end
   end
 
   describe "language stanza" do
-    context "when language is set explicitly" do
-      subject(:cask) do
+    it "allows multilingual casks" do
+      cask = lambda do
         Cask::Cask.new("cask-with-apps") do
           language "zh" do
             sha256 "abc123"
             "zh-CN"
           end
 
-          language "en", default: true do
+          language "en-US", default: true do
             sha256 "xyz789"
             "en-US"
           end
@@ -173,63 +135,35 @@ RSpec.describe Cask::DSL, :cask do
         end
       end
 
-      matcher :be_the_chinese_version do
-        match do |cask|
-          expect(cask.language).to eq("zh-CN")
-          expect(cask.sha256).to eq("abc123")
-          expect(cask.url.to_s).to eq("https://example.org/zh-CN.zip")
-        end
-      end
+      allow(MacOS).to receive(:languages).and_return(["zh"])
+      expect(cask.call.language).to eq("zh-CN")
+      expect(cask.call.sha256).to eq("abc123")
+      expect(cask.call.url.to_s).to eq("https://example.org/zh-CN.zip")
 
-      matcher :be_the_english_version do
-        match do |cask|
-          expect(cask.language).to eq("en-US")
-          expect(cask.sha256).to eq("xyz789")
-          expect(cask.url.to_s).to eq("https://example.org/en-US.zip")
-        end
-      end
+      allow(MacOS).to receive(:languages).and_return(["zh-XX"])
+      expect(cask.call.language).to eq("zh-CN")
+      expect(cask.call.sha256).to eq("abc123")
+      expect(cask.call.url.to_s).to eq("https://example.org/zh-CN.zip")
 
-      before do
-        config = cask.config
-        config.languages = languages
-        cask.config = config
-      end
+      allow(MacOS).to receive(:languages).and_return(["en"])
+      expect(cask.call.language).to eq("en-US")
+      expect(cask.call.sha256).to eq("xyz789")
+      expect(cask.call.url.to_s).to eq("https://example.org/en-US.zip")
 
-      describe "to 'zh'" do
-        let(:languages) { ["zh"] }
+      allow(MacOS).to receive(:languages).and_return(["xx-XX"])
+      expect(cask.call.language).to eq("en-US")
+      expect(cask.call.sha256).to eq("xyz789")
+      expect(cask.call.url.to_s).to eq("https://example.org/en-US.zip")
 
-        it { is_expected.to be_the_chinese_version }
-      end
+      allow(MacOS).to receive(:languages).and_return(["xx-XX", "zh", "en"])
+      expect(cask.call.language).to eq("zh-CN")
+      expect(cask.call.sha256).to eq("abc123")
+      expect(cask.call.url.to_s).to eq("https://example.org/zh-CN.zip")
 
-      describe "to 'zh-XX'" do
-        let(:languages) { ["zh-XX"] }
-
-        it { is_expected.to be_the_chinese_version }
-      end
-
-      describe "to 'en'" do
-        let(:languages) { ["en"] }
-
-        it { is_expected.to be_the_english_version }
-      end
-
-      describe "to 'xx-XX'" do
-        let(:languages) { ["xx-XX"] }
-
-        it { is_expected.to be_the_english_version }
-      end
-
-      describe "to 'xx-XX,zh,en'" do
-        let(:languages) { ["xx-XX", "zh", "en"] }
-
-        it { is_expected.to be_the_chinese_version }
-      end
-
-      describe "to 'xx-XX,en-US,zh'" do
-        let(:languages) { ["xx-XX", "en-US", "zh"] }
-
-        it { is_expected.to be_the_english_version }
-      end
+      allow(MacOS).to receive(:languages).and_return(["xx-XX", "en-US", "zh"])
+      expect(cask.call.language).to eq("en-US")
+      expect(cask.call.sha256).to eq("xyz789")
+      expect(cask.call.url.to_s).to eq("https://example.org/en-US.zip")
     end
 
     it "returns an empty array if no languages are specified" do
@@ -309,7 +243,7 @@ RSpec.describe Cask::DSL, :cask do
   end
 
   describe "url stanza" do
-    let(:token) { "invalid-two-url" }
+    let(:token) { "invalid/invalid-two-url" }
 
     it "prevents defining multiple urls" do
       expect { cask }.to raise_error(Cask::CaskInvalidError, /'url' stanza may only appear once/)
@@ -317,7 +251,7 @@ RSpec.describe Cask::DSL, :cask do
   end
 
   describe "homepage stanza" do
-    let(:token) { "invalid-two-homepage" }
+    let(:token) { "invalid/invalid-two-homepage" }
 
     it "prevents defining multiple homepages" do
       expect { cask }.to raise_error(Cask::CaskInvalidError, /'homepage' stanza may only appear once/)
@@ -325,47 +259,39 @@ RSpec.describe Cask::DSL, :cask do
   end
 
   describe "version stanza" do
-    let(:token) { "invalid-two-version" }
+    let(:token) { "invalid/invalid-two-version" }
 
     it "prevents defining multiple versions" do
       expect { cask }.to raise_error(Cask::CaskInvalidError, /'version' stanza may only appear once/)
     end
   end
 
-  describe "arch stanza" do
-    let(:token) { "invalid-two-arch" }
+  describe "appcast stanza" do
+    let(:token) { "with-appcast" }
 
-    it "prevents defining multiple arches" do
-      expect { cask }.to raise_error(Cask::CaskInvalidError, /'arch' stanza may only appear once/)
+    it "allows appcasts to be specified" do
+      expect(cask.appcast.to_s).to match(/^http/)
     end
 
-    context "when no intel value is specified" do
-      let(:token) { "arch-arm-only" }
+    context "when multiple appcasts are defined" do
+      let(:token) { "invalid/invalid-appcast-multiple" }
 
-      context "when running on arm" do
-        before do
-          allow(Hardware::CPU).to receive(:type).and_return(:arm)
-        end
-
-        it "returns the value" do
-          expect(cask.url.to_s).to eq "file://#{TEST_FIXTURE_DIR}/cask/caffeine-arm.zip"
-        end
+      it "raises an error" do
+        expect { cask }.to raise_error(Cask::CaskInvalidError, /'appcast' stanza may only appear once/)
       end
+    end
 
-      context "when running on intel" do
-        before do
-          allow(Hardware::CPU).to receive(:type).and_return(:intel)
-        end
+    context "when appcast URL is invalid" do
+      let(:token) { "invalid/invalid-appcast-url" }
 
-        it "defaults to `nil` for the other when no arrays are passed" do
-          expect(cask.url.to_s).to eq "file://#{TEST_FIXTURE_DIR}/cask/caffeine.zip"
-        end
+      it "refuses to load" do
+        expect { cask }.to raise_error(Cask::CaskInvalidError)
       end
     end
   end
 
   describe "depends_on stanza" do
-    let(:token) { "invalid-depends-on-key" }
+    let(:token) { "invalid/invalid-depends-on-key" }
 
     it "refuses to load with an invalid depends_on key" do
       expect { cask }.to raise_error(Cask::CaskInvalidError)
@@ -377,7 +303,7 @@ RSpec.describe Cask::DSL, :cask do
       let(:token) { "with-depends-on-formula" }
 
       it "allows depends_on formula to be specified" do
-        expect(cask.depends_on.formula).not_to be_nil
+        expect(cask.depends_on.formula).not_to be nil
       end
     end
 
@@ -385,40 +311,40 @@ RSpec.describe Cask::DSL, :cask do
       let(:token) { "with-depends-on-formula-multiple" }
 
       it "allows multiple depends_on formula to be specified" do
-        expect(cask.depends_on.formula).not_to be_nil
+        expect(cask.depends_on.formula).not_to be nil
       end
     end
   end
 
   describe "depends_on cask" do
-    context "with a single cask" do
+    context "specifying one" do
       let(:token) { "with-depends-on-cask" }
 
       it "is allowed" do
-        expect(cask.depends_on.cask).not_to be_nil
+        expect(cask.depends_on.cask).not_to be nil
       end
     end
 
-    context "when specifying multiple" do
+    context "specifying multiple" do
       let(:token) { "with-depends-on-cask-multiple" }
 
       it "is allowed" do
-        expect(cask.depends_on.cask).not_to be_nil
+        expect(cask.depends_on.cask).not_to be nil
       end
     end
   end
 
   describe "depends_on macos" do
-    context "when the depends_on macos value is invalid" do
-      let(:token) { "invalid-depends-on-macos-bad-release" }
+    context "invalid depends_on macos value" do
+      let(:token) { "invalid/invalid-depends-on-macos-bad-release" }
 
       it "refuses to load" do
         expect { cask }.to raise_error(Cask::CaskInvalidError)
       end
     end
 
-    context "when there are conflicting depends_on macos forms" do
-      let(:token) { "invalid-depends-on-macos-conflicting-forms" }
+    context "conflicting depends_on macos forms" do
+      let(:token) { "invalid/invalid-depends-on-macos-conflicting-forms" }
 
       it "refuses to load" do
         expect { cask }.to raise_error(Cask::CaskInvalidError)
@@ -427,16 +353,16 @@ RSpec.describe Cask::DSL, :cask do
   end
 
   describe "depends_on arch" do
-    context "when valid" do
+    context "valid" do
       let(:token) { "with-depends-on-arch" }
 
       it "is allowed to be specified" do
-        expect(cask.depends_on.arch).not_to be_nil
+        expect(cask.depends_on.arch).not_to be nil
       end
     end
 
-    context "with invalid depends_on arch value" do
-      let(:token) { "invalid-depends-on-arch-value" }
+    context "invalid depends_on arch value" do
+      let(:token) { "invalid/invalid-depends-on-arch-value" }
 
       it "refuses to load" do
         expect { cask }.to raise_error(Cask::CaskInvalidError)
@@ -444,30 +370,26 @@ RSpec.describe Cask::DSL, :cask do
     end
   end
 
-  describe "conflicts_with cask" do
-    let(:local_caffeine) do
-      Cask::CaskLoader.load(cask_path("local-caffeine"))
+  describe "depends_on x11" do
+    context "valid" do
+      let(:token) { "with-depends-on-x11" }
+
+      it "is allowed to be specified" do
+        expect(cask.depends_on.x11).not_to be nil
+      end
     end
 
-    let(:with_conflicts_with) do
-      Cask::CaskLoader.load(cask_path("with-conflicts-with"))
-    end
+    context "invalid depends_on x11 value" do
+      let(:token) { "invalid/invalid-depends-on-x11-value" }
 
-    it "installs the dependency of a Cask and the Cask itself" do
-      Cask::Installer.new(local_caffeine).install
-
-      expect(local_caffeine).to be_installed
-
-      expect do
-        Cask::Installer.new(with_conflicts_with).install
-      end.to raise_error(Cask::CaskConflictError, "Cask 'with-conflicts-with' conflicts with 'local-caffeine'.")
-
-      expect(with_conflicts_with).not_to be_installed
+      it "refuses to load" do
+        expect { cask }.to raise_error(Cask::CaskInvalidError)
+      end
     end
   end
 
   describe "conflicts_with stanza" do
-    context "when valid" do
+    context "valid" do
       let(:token) { "with-conflicts-with" }
 
       it "allows conflicts_with stanza to be specified" do
@@ -475,8 +397,8 @@ RSpec.describe Cask::DSL, :cask do
       end
     end
 
-    context "with invalid conflicts_with key" do
-      let(:token) { "invalid-conflicts-with-key" }
+    context "invalid conflicts_with key" do
+      let(:token) { "invalid/invalid-conflicts-with-key" }
 
       it "refuses to load invalid conflicts_with key" do
         expect { cask }.to raise_error(Cask::CaskInvalidError)
@@ -485,7 +407,7 @@ RSpec.describe Cask::DSL, :cask do
   end
 
   describe "installer stanza" do
-    context "when script" do
+    context "script" do
       let(:token) { "with-installer-script" }
 
       it "allows installer script to be specified" do
@@ -496,12 +418,12 @@ RSpec.describe Cask::DSL, :cask do
       end
     end
 
-    context "when manual" do
+    context "manual" do
       let(:token) { "with-installer-manual" }
 
       it "allows installer manual to be specified" do
         installer = cask.artifacts.first
-        expect(installer.instance_variable_get(:@manual_install)).to be true
+        expect(installer).to be_a(Cask::Artifact::Installer::ManualInstaller)
         expect(installer.path).to eq(Pathname("Caffeine.app"))
       end
     end
@@ -517,7 +439,7 @@ RSpec.describe Cask::DSL, :cask do
     end
 
     context "when there is are activatable artifacts" do
-      let(:token) { "invalid-stage-only-conflict" }
+      let(:token) { "invalid/invalid-stage-only-conflict" }
 
       it "prevents specifying stage_only" do
         expect { cask }.to raise_error(Cask::CaskInvalidError, /'stage_only' must be the only activatable artifact/)
@@ -534,7 +456,7 @@ RSpec.describe Cask::DSL, :cask do
   end
 
   describe "#appdir" do
-    context "with interpolation of the appdir in stanzas" do
+    context "interpolation of the appdir in stanzas" do
       let(:token) { "appdir-interpolation" }
 
       it "is allowed" do
@@ -543,15 +465,16 @@ RSpec.describe Cask::DSL, :cask do
     end
 
     it "does not include a trailing slash" do
-      config = Cask::Config.new(explicit: {
-        appdir: "/Applications/",
-      })
+      original_appdir = Cask::Config.global.appdir
+      Cask::Config.global.appdir = "#{original_appdir}/"
 
-      cask = Cask::Cask.new("appdir-trailing-slash", config:) do
+      cask = Cask::Cask.new("appdir-trailing-slash") do
         binary "#{appdir}/some/path"
       end
 
-      expect(cask.artifacts.first.source).to eq(Pathname("/Applications/some/path"))
+      expect(cask.artifacts.first.source).to eq(original_appdir/"some/path")
+    ensure
+      Cask::Config.global.appdir = original_appdir
     end
   end
 
@@ -571,7 +494,7 @@ RSpec.describe Cask::DSL, :cask do
         app "App.app"
       end
 
-      expect(cask.artifacts.map { |artifact| artifact.class.dsl_key }).to eq [
+      expect(cask.artifacts.map(&:class).map(&:dsl_key)).to eq [
         :preflight,
         :app,
         :binary,

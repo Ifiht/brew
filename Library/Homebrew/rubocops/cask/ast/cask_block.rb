@@ -1,4 +1,3 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
 require "forwardable"
@@ -6,75 +5,70 @@ require "forwardable"
 module RuboCop
   module Cask
     module AST
-      class StanzaBlock
-        extend T::Helpers
+      # This class wraps the AST block node that represents the entire cask
+      # definition. It includes various helper methods to aid cops in their
+      # analysis.
+      class CaskBlock
+        extend Forwardable
 
-        sig { returns(RuboCop::AST::BlockNode) }
-        attr_reader :block_node
-
-        sig { returns(T::Array[Parser::Source::Comment]) }
-        attr_reader :comments
-
-        sig { params(block_node: RuboCop::AST::BlockNode, comments: T::Array[Parser::Source::Comment]).void }
         def initialize(block_node, comments)
           @block_node = block_node
           @comments = comments
         end
 
-        sig { returns(T::Array[Stanza]) }
-        def stanzas
-          return [] unless (block_body = block_node.block_body)
+        attr_reader :block_node, :comments
 
-          # If a block only contains one stanza, it is that stanza's direct parent, otherwise
-          # stanzas are grouped in a nested block and the block is that nested block's parent.
-          is_stanza = if block_body.begin_block?
-            ->(node) { node.parent.parent == block_node }
-          else
-            ->(node) { node.parent == block_node }
-          end
-
-          @stanzas ||= block_body.each_node
-                                 .select(&:stanza?)
-                                 .select(&is_stanza)
-                                 .map { |node| Stanza.new(node, comments) }
-        end
-      end
-
-      # This class wraps the AST block node that represents the entire cask
-      # definition. It includes various helper methods to aid cops in their
-      # analysis.
-      class CaskBlock < StanzaBlock
-        extend Forwardable
-
-        def cask_node
-          block_node
-        end
+        alias cask_node block_node
 
         def_delegator :cask_node, :block_body, :cask_body
 
         def header
-          @header ||= CaskHeader.new(block_node.method_node)
+          @header ||= CaskHeader.new(cask_node.method_node)
         end
 
-        # TODO: Use `StanzaBlock#stanzas` for all cops, where possible.
         def stanzas
           return [] unless cask_body
 
           @stanzas ||= cask_body.each_node
                                 .select(&:stanza?)
-                                .map { |node| Stanza.new(node, comments) }
+                                .map { |node| Stanza.new(node, stanza_comments(node)) }
         end
 
         def toplevel_stanzas
-          # If a `cask` block only contains one stanza, it is that stanza's direct parent,
-          # otherwise stanzas are grouped in a block and `cask` is that block's parent.
-          is_toplevel_stanza = if cask_body.begin_block?
-            ->(stanza) { stanza.parent_node.parent.cask_block? }
-          else
-            ->(stanza) { stanza.parent_node.cask_block? }
-          end
+          @toplevel_stanzas ||= stanzas.select(&:toplevel_stanza?)
+        end
 
-          @toplevel_stanzas ||= stanzas.select(&is_toplevel_stanza)
+        def sorted_toplevel_stanzas
+          @sorted_toplevel_stanzas ||= sort_stanzas(toplevel_stanzas)
+        end
+
+        private
+
+        def sort_stanzas(stanzas)
+          stanzas.sort do |s1, s2|
+            i1 = stanza_order_index(s1)
+            i2 = stanza_order_index(s2)
+            if i1 == i2
+              i1 = stanzas.index(s1)
+              i2 = stanzas.index(s2)
+            end
+            i1 - i2
+          end
+        end
+
+        def stanza_order_index(stanza)
+          Constants::STANZA_ORDER.index(stanza.stanza_name)
+        end
+
+        def stanza_comments(stanza_node)
+          stanza_node.each_node.reduce([]) do |comments, node|
+            comments | comments_hash[node.loc]
+          end
+        end
+
+        def comments_hash
+          @comments_hash ||= Parser::Source::Comment
+                             .associate_locations(cask_node, comments)
         end
       end
     end

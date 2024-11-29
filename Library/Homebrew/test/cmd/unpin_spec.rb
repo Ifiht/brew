@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
 require "cmd/shared_examples/args_parse"
-require "cmd/unpin"
 
-RSpec.describe Homebrew::Cmd::Unpin do
+describe "Homebrew.unpin_args" do
   it_behaves_like "parseable arguments"
+end
 
-  it "unpins a Formula's version", :integration_test do
+describe "brew unpin", :integration_test do
+  it "unpins a Formula's version" do
     install_test_formula "testball"
     Formula["testball"].pin
 

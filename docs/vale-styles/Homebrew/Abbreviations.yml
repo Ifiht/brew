@@ -1,8 +1,8 @@
 ---
 extends: substitution
-message: Use '%s' instead of '%s'.
+message: Use '%s'
 ignorecase: false
-link: "https://github.com/Homebrew/brew/blob/HEAD/docs/Prose-Style-Guidelines.md#style-and-usage"
+link: 'https://github.com/Homebrew/brew/blob/HEAD/docs/Prose-Style-Guidelines.md#style-and-usage'
 level: error
 nonword: true
 swap:
@@ -10,9 +10,3 @@ swap:
   '\bie\b': i.e.
   'e\.g\.,': e.g.
   'i\.e\.,': i.e.
-  '(?<!^\{.*|\.|<)\borg\b': organisation
-  '(?<!^\{.*)\borgs\b': organisations
-  '(?<!^\{.*|<|\{#)\brepo\b': repository # FIXME: https://github.com/errata-ai/vale/issues/818
-  '(?<!^\{.*)\brepos\b': repositories
-  '\bivar\b': instance variable
-  '\bivars\b': instance variables

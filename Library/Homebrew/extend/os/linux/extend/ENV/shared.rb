@@ -1,16 +1,14 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
 module SharedEnvExtension
+  # @private
   def effective_arch
-    if @build_bottle && @bottle_arch
-      @bottle_arch.to_sym
-    elsif @build_bottle
+    if Homebrew.args.build_bottle? && Homebrew.args.bottle_arch
+      Homebrew.args.bottle_arch.to_sym
+    elsif Homebrew.args.build_bottle?
       Hardware.oldest_cpu
-    elsif Hardware::CPU.intel? || Hardware::CPU.arm?
-      :native
     else
-      :dunno
+      :native
     end
   end
 end

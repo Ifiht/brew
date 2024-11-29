@@ -2,7 +2,7 @@
 
 require_relative "shared_examples"
 
-RSpec.describe UnpackStrategy::Jar, :needs_unzip do
+describe UnpackStrategy::Jar, :needs_unzip do
   let(:path) { TEST_FIXTURE_DIR/"test.jar" }
 
   include_examples "UnpackStrategy::detect"

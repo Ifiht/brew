@@ -1,22 +1,21 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
 require "macho"
+require "os/mac/architecture_list"
 
-# {Pathname} extension for dealing with Mach-O files.
 module MachOShim
   extend Forwardable
-  extend T::Helpers
 
-  requires_ancestor { Pathname }
+  delegate [:dylib_id, :rpaths, :delete_rpath] => :macho
 
-  delegate [:dylib_id] => :macho
-
+  # @private
   def macho
-    @macho ||= MachO.open(to_s)
+    @macho ||= begin
+      MachO.open(to_s)
+    end
   end
-  private :macho
 
+  # @private
   def mach_data
     @mach_data ||= begin
       machos = []
@@ -30,7 +29,7 @@ module MachOShim
 
       machos.each do |m|
         arch = case m.cputype
-        when :x86_64, :i386, :ppc64, :arm64, :arm then m.cputype
+        when :x86_64, :i386, :ppc64 then m.cputype
         when :ppc then :ppc7400
         else :dunno
         end
@@ -41,7 +40,7 @@ module MachOShim
         else :dunno
         end
 
-        mach_data << { arch:, type: }
+        mach_data << { arch: arch, type: type }
       end
 
       mach_data
@@ -56,78 +55,15 @@ module MachOShim
       []
     end
   end
-  private :mach_data
 
-  # TODO: See if the `#write!` call can be delayed until
-  # we know we're not making any changes to the rpaths.
-  def delete_rpath(rpath, **options)
-    candidates = rpaths(resolve_variable_references: false).select do |r|
-      resolve_variable_name(r) == resolve_variable_name(rpath)
-    end
+  def dynamically_linked_libraries(except: :none)
+    lcs = macho.dylib_load_commands.reject { |lc| lc.type == except }
 
-    # Delete the last instance to avoid changing the order in which rpaths are searched.
-    rpath_to_delete = candidates.last
-    options[:last] = true
-
-    macho.delete_rpath(rpath_to_delete, options)
-    macho.write!
-  end
-
-  def change_rpath(old, new, **options)
-    macho.change_rpath(old, new, options)
-    macho.write!
-  end
-
-  def change_dylib_id(id, **options)
-    macho.change_dylib_id(id, options)
-    macho.write!
-  end
-
-  def change_install_name(old, new, **options)
-    macho.change_install_name(old, new, options)
-    macho.write!
-  end
-
-  def dynamically_linked_libraries(except: :none, resolve_variable_references: true)
-    lcs = macho.dylib_load_commands
-    lcs.reject! { |lc| lc.flag?(except) } if except != :none
-    names = lcs.map { |lc| lc.name.to_s }.uniq
-    names.map! { resolve_variable_name(_1) } if resolve_variable_references
-
-    names
-  end
-
-  def rpaths(resolve_variable_references: true)
-    names = macho.rpaths
-    # Don't recursively resolve rpaths to avoid infinite loops.
-    names.map! { |name| resolve_variable_name(name, resolve_rpaths: false) } if resolve_variable_references
-
-    names
-  end
-
-  def resolve_variable_name(name, resolve_rpaths: true)
-    if name.start_with? "@loader_path"
-      Pathname(name.sub("@loader_path", dirname)).cleanpath.to_s
-    elsif name.start_with?("@executable_path") && binary_executable?
-      Pathname(name.sub("@executable_path", dirname)).cleanpath.to_s
-    elsif resolve_rpaths && name.start_with?("@rpath") && (target = resolve_rpath(name)).present?
-      target
-    else
-      name
-    end
-  end
-
-  def resolve_rpath(name)
-    target = T.let(nil, T.nilable(String))
-    return unless rpaths(resolve_variable_references: true).find do |rpath|
-      File.exist?(target = File.join(rpath, name.delete_prefix("@rpath")))
-    end
-
-    target
+    lcs.map(&:name).map(&:to_s).uniq
   end
 
   def archs
-    mach_data.map { |m| m.fetch :arch }
+    mach_data.map { |m| m.fetch :arch }.extend(ArchitectureListExtension)
   end
 
   def arch
@@ -158,16 +94,19 @@ module MachOShim
     arch == :ppc64
   end
 
+  # @private
   def dylib?
     mach_data.any? { |m| m.fetch(:type) == :dylib }
   end
 
+  # @private
   def mach_o_executable?
     mach_data.any? { |m| m.fetch(:type) == :executable }
   end
 
   alias binary_executable? mach_o_executable?
 
+  # @private
   def mach_o_bundle?
     mach_data.any? { |m| m.fetch(:type) == :bundle }
   end

@@ -1,48 +1,24 @@
-# typed: true # rubocop:todo Sorbet/StrictSigil
 # frozen_string_literal: true
 
-require "os/linux/ld"
-
-# {Pathname} extension for dealing with ELF files.
 # @see https://en.wikipedia.org/wiki/Executable_and_Linkable_Format#File_header
 module ELFShim
-  extend T::Helpers
-
   MAGIC_NUMBER_OFFSET = 0
-  private_constant :MAGIC_NUMBER_OFFSET
   MAGIC_NUMBER_ASCII = "\x7fELF"
-  private_constant :MAGIC_NUMBER_ASCII
 
   OS_ABI_OFFSET = 0x07
-  private_constant :OS_ABI_OFFSET
   OS_ABI_SYSTEM_V = 0
-  private_constant :OS_ABI_SYSTEM_V
   OS_ABI_LINUX = 3
-  private_constant :OS_ABI_LINUX
 
   TYPE_OFFSET = 0x10
-  private_constant :TYPE_OFFSET
   TYPE_EXECUTABLE = 2
-  private_constant :TYPE_EXECUTABLE
   TYPE_SHARED = 3
-  private_constant :TYPE_SHARED
 
   ARCHITECTURE_OFFSET = 0x12
-  private_constant :ARCHITECTURE_OFFSET
   ARCHITECTURE_I386 = 0x3
-  private_constant :ARCHITECTURE_I386
   ARCHITECTURE_POWERPC = 0x14
-  private_constant :ARCHITECTURE_POWERPC
-  ARCHITECTURE_POWERPC64 = 0x15
-  private_constant :ARCHITECTURE_POWERPC64
   ARCHITECTURE_ARM = 0x28
-  private_constant :ARCHITECTURE_ARM
-  ARCHITECTURE_X86_64 = 0x3E
-  private_constant :ARCHITECTURE_X86_64
+  ARCHITECTURE_X86_64 = 0x62
   ARCHITECTURE_AARCH64 = 0xB7
-  private_constant :ARCHITECTURE_AARCH64
-
-  requires_ancestor { Pathname }
 
   def read_uint8(offset)
     read(1, offset).unpack1("C")
@@ -54,7 +30,7 @@ module ELFShim
 
   def elf?
     return @elf if defined? @elf
-    return @elf = false if read(MAGIC_NUMBER_ASCII.size, MAGIC_NUMBER_OFFSET) != MAGIC_NUMBER_ASCII
+    return @elf = false unless read(MAGIC_NUMBER_ASCII.size, MAGIC_NUMBER_OFFSET) == MAGIC_NUMBER_ASCII
 
     # Check that this ELF file is for Linux or System V.
     # OS_ABI is often set to 0 (System V), regardless of the target platform.
@@ -67,21 +43,11 @@ module ELFShim
     @arch ||= case read_uint16(ARCHITECTURE_OFFSET)
     when ARCHITECTURE_I386 then :i386
     when ARCHITECTURE_X86_64 then :x86_64
-    when ARCHITECTURE_POWERPC then :ppc32
-    when ARCHITECTURE_POWERPC64 then :ppc64
+    when ARCHITECTURE_POWERPC then :powerpc
     when ARCHITECTURE_ARM then :arm
     when ARCHITECTURE_AARCH64 then :arm64
     else :dunno
     end
-  end
-
-  def arch_compatible?(wanted_arch)
-    return true unless elf?
-
-    # Treat ppc64le and ppc64 the same
-    wanted_arch = :ppc64 if wanted_arch == :ppc64le
-
-    wanted_arch == arch
   end
 
   def elf_type
@@ -102,39 +68,41 @@ module ELFShim
     elf_type == :executable
   end
 
-  # The runtime search path, such as:
-  # "/lib:/usr/lib:/usr/local/lib"
-  def rpath
-    return @rpath if defined? @rpath
-
-    @rpath = rpath_using_patchelf_rb
-  end
-
-  # An array of runtime search path entries, such as:
-  # ["/lib", "/usr/lib", "/usr/local/lib"]
-  def rpaths
-    Array(rpath&.split(":"))
-  end
-
   def interpreter
     return @interpreter if defined? @interpreter
 
-    @interpreter = patchelf_patcher.interpreter
-  end
-
-  def patch!(interpreter: nil, rpath: nil)
-    return if interpreter.blank? && rpath.blank?
-
-    save_using_patchelf_rb interpreter, rpath
+    @interpreter = if HOMEBREW_PATCHELF_RB
+      begin
+        patchelf_patcher.interpreter
+      rescue PatchELF::PatchError => e
+        opoo e unless e.to_s.start_with? "No interpreter found"
+        nil
+      end
+    elsif (patchelf = DevelopmentTools.locate "patchelf")
+      interp = Utils.popen_read(patchelf, "--print-interpreter", to_s, err: :out).strip
+      $CHILD_STATUS.success? ? interp : nil
+    elsif (file = DevelopmentTools.locate("file"))
+      output = Utils.popen_read(file, "-L", "-b", to_s, err: :out).strip
+      output[/^ELF.*, interpreter (.+?), /, 1]
+    else
+      raise "Please install either patchelf or file."
+    end
   end
 
   def dynamic_elf?
     return @dynamic_elf if defined? @dynamic_elf
 
-    @dynamic_elf = patchelf_patcher.elf.segment_by_type(:DYNAMIC).present?
+    @dynamic_elf = if HOMEBREW_PATCHELF_RB
+      patchelf_patcher.instance_variable_get(:@elf).segment_by_type(:DYNAMIC).present?
+    elsif which "readelf"
+      Utils.popen_read("readelf", "-l", to_path).include?(" DYNAMIC ")
+    elsif which "file"
+      !Utils.popen_read("file", "-L", "-b", to_path)[/dynamic|shared/].nil?
+    else
+      raise "Please install either readelf (from binutils) or file."
+    end
   end
 
-  # Helper class for reading metadata from an ELF file.
   class Metadata
     attr_reader :path, :dylib_id, :dylibs
 
@@ -144,91 +112,105 @@ module ELFShim
       @dylib_id, needed = needed_libraries path
       return if needed.empty?
 
-      @dylibs = needed.map { |lib| find_full_lib_path(lib).to_s }
+      ldd = DevelopmentTools.locate "ldd"
+      ldd_output = Utils.popen_read(ldd, path.expand_path.to_s).split("\n")
+      return unless $CHILD_STATUS.success?
+
+      ldd_paths = ldd_output.map do |line|
+        match = line.match(/\t.+ => (.+) \(.+\)|\t(.+) => not found/)
+        next unless match
+
+        match.captures.compact.first
+      end.compact
+      @dylibs = ldd_paths.select do |ldd_path|
+        next true unless ldd_path.start_with? "/"
+
+        needed.include? File.basename(ldd_path)
+      end
     end
 
     private
 
     def needed_libraries(path)
-      return [nil, []] unless path.dynamic_elf?
+      if HOMEBREW_PATCHELF_RB
+        needed_libraries_using_patchelf_rb path
+      elsif DevelopmentTools.locate "readelf"
+        needed_libraries_using_readelf path
+      elsif DevelopmentTools.locate "patchelf"
+        needed_libraries_using_patchelf path
+      else
+        return [nil, []] if path.basename.to_s == "patchelf"
 
-      needed_libraries_using_patchelf_rb path
+        raise "patchelf must be installed: brew install patchelf"
+      end
     end
 
     def needed_libraries_using_patchelf_rb(path)
       patcher = path.patchelf_patcher
-      [patcher.soname, patcher.needed]
+      return [nil, []] unless patcher
+
+      soname = begin
+        patcher.soname
+      rescue PatchELF::PatchError => e
+        opoo e unless e.to_s.start_with? "Entry DT_SONAME not found, not a shared library?"
+        nil
+      end
+      needed = begin
+        patcher.needed
+      rescue PatchELF::PatchError => e
+        opoo e
+        []
+      end
+      [soname, needed]
     end
 
-    def find_full_lib_path(basename)
-      local_paths = (path.patchelf_patcher.runpath || path.patchelf_patcher.rpath)&.split(":")
+    def needed_libraries_using_patchelf(path)
+      return [nil, []] unless path.dynamic_elf?
 
-      # Search for dependencies in the runpath/rpath first
-      local_paths&.each do |local_path|
-        local_path = OS::Linux::Elf.expand_elf_dst(local_path, "ORIGIN", path.parent)
-        candidate = Pathname(local_path)/basename
-        return candidate if candidate.exist? && candidate.elf?
+      patchelf = DevelopmentTools.locate "patchelf"
+      if path.dylib?
+        command = [patchelf, "--print-soname", path.expand_path.to_s]
+        soname = Utils.safe_popen_read(*command).chomp
       end
-
-      # Check if DF_1_NODEFLIB is set
-      dt_flags_1 = path.patchelf_patcher.elf.segment_by_type(:dynamic)&.tag_by_type(:flags_1)
-      nodeflib_flag = if dt_flags_1.nil?
-        false
-      else
-        dt_flags_1.value & ELFTools::Constants::DF::DF_1_NODEFLIB != 0
-      end
-
-      linker_library_paths = OS::Linux::Ld.library_paths
-      linker_system_dirs = OS::Linux::Ld.system_dirs
-
-      # If DF_1_NODEFLIB is set, exclude any library paths that are subdirectories
-      # of the system dirs
-      if nodeflib_flag
-        linker_library_paths = linker_library_paths.reject do |lib_path|
-          linker_system_dirs.any? { |system_dir| Utils::Path.child_of? system_dir, lib_path }
-        end
-      end
-
-      # If not found, search recursively in the paths listed in ld.so.conf (skipping
-      # paths that are subdirectories of the system dirs if DF_1_NODEFLIB is set)
-      linker_library_paths.each do |linker_library_path|
-        candidate = Pathname(linker_library_path)/basename
-        return candidate if candidate.exist? && candidate.elf?
-      end
-
-      # If not found, search in the system dirs, unless DF_1_NODEFLIB is set
-      unless nodeflib_flag
-        linker_system_dirs.each do |linker_system_dir|
-          candidate = Pathname(linker_system_dir)/basename
-          return candidate if candidate.exist? && candidate.elf?
-        end
-      end
-
-      basename
+      command = [patchelf, "--print-needed", path.expand_path.to_s]
+      needed = Utils.safe_popen_read(*command).split("\n")
+      [soname, needed]
     end
-  end
-  private_constant :Metadata
 
-  def save_using_patchelf_rb(new_interpreter, new_rpath)
-    patcher = patchelf_patcher
-    patcher.interpreter = new_interpreter if new_interpreter.present?
-    patcher.rpath = new_rpath if new_rpath.present?
-    patcher.save(patchelf_compatible: true)
-  end
+    def needed_libraries_using_readelf(path)
+      soname = nil
+      needed = []
+      command = ["readelf", "-d", path.expand_path.to_s]
+      lines = Utils.popen_read(*command, err: :out).split("\n")
+      lines.each do |s|
+        next if s.start_with?("readelf: Warning: possibly corrupt ELF header")
 
-  def rpath_using_patchelf_rb
-    patchelf_patcher.runpath || patchelf_patcher.rpath
+        filename = s[/\[(.*)\]/, 1]
+        next if filename.nil?
+
+        if s.include? "(SONAME)"
+          soname = filename
+        elsif s.include? "(NEEDED)"
+          needed << filename
+        end
+      end
+      [soname, needed]
+    end
   end
 
   def patchelf_patcher
-    require "patchelf"
-    @patchelf_patcher ||= ::PatchELF::Patcher.new to_s, on_error: :silent
+    return unless HOMEBREW_PATCHELF_RB
+
+    @patchelf_patcher ||= begin
+      Homebrew.install_bundler_gems!
+      require "patchelf"
+      PatchELF::Patcher.new to_s, logging: false
+    end
   end
 
   def metadata
     @metadata ||= Metadata.new(self)
   end
-  private :metadata
 
   def dylib_id
     metadata.dylib_id
@@ -236,39 +218,5 @@ module ELFShim
 
   def dynamically_linked_libraries(*)
     metadata.dylibs
-  end
-end
-
-module OS
-  module Linux
-    # Helper functions for working with ELF objects.
-    #
-    # @api private
-    module Elf
-      sig { params(str: String, ref: String, repl: T.any(String, Pathname)).returns(String) }
-      def self.expand_elf_dst(str, ref, repl)
-        # ELF gABI rules for DSTs:
-        #   - Longest possible sequence using the rules (greedy).
-        #   - Must start with a $ (enforced by caller).
-        #   - Must follow $ with one underscore or ASCII [A-Za-z] (caller
-        #     follows these rules for REF) or '{' (start curly quoted name).
-        #   - Must follow first two characters with zero or more [A-Za-z0-9_]
-        #     (enforced by caller) or '}' (end curly quoted name).
-        # (from https://github.com/bminor/glibc/blob/41903cb6f460d62ba6dd2f4883116e2a624ee6f8/elf/dl-load.c#L182-L228)
-
-        # In addition to capturing a token, also attempt to capture opening/closing braces and check that they are not
-        # mismatched before expanding.
-        str.gsub(/\$({?)([a-zA-Z_][a-zA-Z0-9_]*)(}?)/) do |orig_str|
-          has_opening_brace = ::Regexp.last_match(1).present?
-          matched_text = ::Regexp.last_match(2)
-          has_closing_brace = ::Regexp.last_match(3).present?
-          if (matched_text == ref) && (has_opening_brace == has_closing_brace)
-            repl
-          else
-            orig_str
-          end
-        end
-      end
-    end
   end
 end

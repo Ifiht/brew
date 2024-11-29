@@ -2,7 +2,7 @@
 
 require "formula"
 
-RSpec.describe Formula do
+describe Formula do
   describe "::new" do
     it "selects stable by default" do
       f = formula do
@@ -39,7 +39,7 @@ RSpec.describe Formula do
         head "foo"
       end
 
-      expect(f.stable).to be_nil
+      expect(f.stable).to be nil
       expect(f).to be_head
     end
 

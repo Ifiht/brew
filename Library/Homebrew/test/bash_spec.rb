@@ -2,7 +2,7 @@
 
 require "open3"
 
-RSpec.describe "Bash" do
+describe "Bash" do
   matcher :have_valid_bash_syntax do
     match do |file|
       stdout, stderr, status = Open3.capture3("/bin/bash", "-n", file)
@@ -17,14 +17,14 @@ RSpec.describe "Bash" do
     end
   end
 
-  describe "brew" do
+  context "brew" do
     subject { HOMEBREW_LIBRARY_PATH.parent.parent/"bin/brew" }
 
     it { is_expected.to have_valid_bash_syntax }
   end
 
-  describe "every `.sh` file" do
-    it "has valid Bash syntax" do
+  context "every `.sh` file" do
+    it "has valid bash syntax" do
       Pathname.glob("#{HOMEBREW_LIBRARY_PATH}/**/*.sh").each do |path|
         relative_path = path.relative_path_from(HOMEBREW_LIBRARY_PATH)
         next if relative_path.to_s.start_with?("shims/", "test/", "vendor/")
@@ -34,21 +34,20 @@ RSpec.describe "Bash" do
     end
   end
 
-  describe "Bash completion" do
+  context "Bash completion" do
     subject { HOMEBREW_LIBRARY_PATH.parent.parent/"completions/bash/brew" }
 
     it { is_expected.to have_valid_bash_syntax }
   end
 
-  describe "every shim script" do
-    it "has valid Bash syntax" do
+  context "every shim script" do
+    it "has valid bash syntax" do
       # These have no file extension, but can be identified by their shebang.
       (HOMEBREW_LIBRARY_PATH/"shims").find do |path|
         next if path.directory?
         next if path.symlink?
         next unless path.executable?
-        next if path.basename.to_s == "cc" # `bash -n` tries to parse the Ruby part
-        next if path.read(12) != "#!/bin/bash\n"
+        next unless path.read(12) == "#!/bin/bash\n"
 
         expect(path).to have_valid_bash_syntax
       end
